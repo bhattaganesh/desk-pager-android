@@ -8,11 +8,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -39,19 +44,28 @@ class ListenerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_ACK_BREAK) {
+            acknowledgeBreak(this)
+            if (Store.topic(this) == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            return START_STICKY
+        }
         val topic = Store.topic(this)
         if (topic == null) {
             stopSelf()
             return START_NOT_STICKY
         }
-        createChannels()
+        createChannels(this)
         val notification = listeningNotification(currentStateRes)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(LISTENING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(LISTENING_ID, notification)
         }
-        if (worker == null || activeTopic != topic) {
+        val forceReconnect = intent?.getBooleanExtra(EXTRA_RECONNECT, false) == true
+        if (worker == null || activeTopic != topic || forceReconnect) {
             running = false
             connection?.disconnect()
             worker?.interrupt()
@@ -70,6 +84,7 @@ class ListenerService : Service() {
     }
 
     override fun onDestroy() {
+        stopStrictAlarm()
         running = false
         activeTopic = null
         connection?.disconnect()
@@ -105,9 +120,13 @@ class ListenerService : Service() {
                         val buzz = Ntfy.parseLine(line) ?: continue
                         since = buzz.id
                         if (Ntfy.isFresh(buzz, System.currentTimeMillis() / 1000)) {
-                            Store.recordBuzz(this, buzz)
-                            showBuzz(buzz)
-                            notifyUi()
+                            if (buzz.title.equals(CLEAR_TITLE, ignoreCase = true)) {
+                                acknowledgeBreak(this)
+                            } else {
+                                Store.recordBuzz(this, buzz)
+                                postBuzzNotification(this, buzz)
+                                notifyUi()
+                            }
                         }
                     }
                 }
@@ -136,58 +155,25 @@ class ListenerService : Service() {
         getSystemService(NotificationManager::class.java).notify(LISTENING_ID, listeningNotification(textRes))
     }
 
-    private fun showBuzz(buzz: Buzz) {
-        val notification = Notification.Builder(this, CHANNEL_BUZZ)
-            .setSmallIcon(R.drawable.ic_buzz)
-            .setContentTitle(buzz.title.ifBlank { getString(R.string.default_buzz_title) })
-            .setContentText(buzz.text)
-            .setStyle(Notification.BigTextStyle().bigText(buzz.text))
-            .setCategory(Notification.CATEGORY_REMINDER)
-            .setContentIntent(openAppIntent())
-            .setAutoCancel(true)
-            .build()
-        // One fixed id: a repeat buzz replaces the previous one and alerts again.
-        getSystemService(NotificationManager::class.java).notify(BUZZ_ID, notification)
-    }
-
     private fun listeningNotification(textRes: Int): Notification =
         Notification.Builder(this, CHANNEL_LISTENING)
             .setSmallIcon(R.drawable.ic_buzz)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(textRes))
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openAppIntent(this))
             .setShowWhen(false)
             .setOngoing(true)
             .build()
-
-    private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
-        this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
-    )
-
-    private fun createChannels() {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_LISTENING, getString(R.string.channel_listening), NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                setShowBadge(false)
-            },
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_BUZZ, getString(R.string.channel_buzz), NotificationManager.IMPORTANCE_HIGH,
-            ).apply {
-                enableVibration(true)
-                vibrationPattern = BUZZ_VIBRATION
-            },
-        )
-    }
 
     companion object {
         private const val TAG = "DeskPager"
         private const val WAKE_LOCK_TAG = "DeskPager:listener"
         private const val CHANNEL_LISTENING = "listening"
+        private const val CHANNEL_STRETCH = "stretch"
         private const val CHANNEL_BUZZ = "buzz"
+        private const val EXTRA_RECONNECT = "reconnect"
+        private const val ACTION_ACK_BREAK = "np.com.ganeshbhatt.deskpager.ACTION_ACK_BREAK"
+        private const val CLEAR_TITLE = "deskpager-clear"
         private const val LISTENING_ID = 1
         private const val BUZZ_ID = 2
         private const val CONNECT_TIMEOUT_MS = 15_000
@@ -195,11 +181,20 @@ class ListenerService : Service() {
         private const val READ_TIMEOUT_MS = 120_000
         private const val MIN_BACKOFF_MS = 5_000L
         private const val MAX_BACKOFF_MS = 60_000L
-        private val BUZZ_VIBRATION = longArrayOf(0, 400, 200, 400, 200, 400)
+        private const val STRICT_INTERVAL_MS = 3_500L
+        private const val STRICT_MAX_CYCLES = 40
+        private val STRETCH_VIBRATION = longArrayOf(0, 260, 150, 260)
+        private val BUZZ_VIBRATION = longArrayOf(0, 500, 180, 500, 180, 550)
         private val mainHandler = Handler(Looper.getMainLooper())
+        private var strictRunnable: Runnable? = null
+        private var activeRingtone: Ringtone? = null
 
         @Volatile
         var streamState: StreamState = StreamState.STOPPED
+            private set
+
+        @Volatile
+        var strictAlarmActive: Boolean = false
             private set
 
         @Volatile
@@ -215,9 +210,181 @@ class ListenerService : Service() {
             mainHandler.post { onUiUpdate?.invoke() }
         }
 
+        private fun openAppIntent(context: Context): PendingIntent = PendingIntent.getActivity(
+            context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        private fun ackBreakPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, ListenerService::class.java).apply {
+                action = ACTION_ACK_BREAK
+            }
+            return PendingIntent.getService(
+                context,
+                10,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
+        /** Ensures notification channels exist for background status, quick stretches, and long breaks. */
+        fun createChannels(context: Context) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_LISTENING, context.getString(R.string.channel_listening), NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    setShowBadge(false)
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_STRETCH, context.getString(R.string.channel_stretch), NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    enableVibration(true)
+                    vibrationPattern = STRETCH_VIBRATION
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_BUZZ, context.getString(R.string.channel_buzz), NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    enableVibration(true)
+                    vibrationPattern = BUZZ_VIBRATION
+                },
+            )
+        }
+
+        /** Posts a high-priority reminder notification and starts strict repeating alarm if it is a Long Break. */
+        fun postBuzzNotification(context: Context, buzz: Buzz) {
+            createChannels(context)
+            val isLongBreak = buzz.title.contains("long break", ignoreCase = true)
+            val isQuickStretch = buzz.title.contains("stretch", ignoreCase = true)
+            val channel = if (isQuickStretch) CHANNEL_STRETCH else CHANNEL_BUZZ
+
+            val ackAction = Notification.Action.Builder(
+                null,
+                context.getString(R.string.ack_break_action),
+                ackBreakPendingIntent(context),
+            ).build()
+
+            val notification = Notification.Builder(context, channel)
+                .setSmallIcon(R.drawable.ic_buzz)
+                .setContentTitle(buzz.title.ifBlank { context.getString(R.string.default_buzz_title) })
+                .setContentText(buzz.text)
+                .setStyle(Notification.BigTextStyle().bigText(buzz.text))
+                .setCategory(if (isLongBreak) Notification.CATEGORY_ALARM else Notification.CATEGORY_REMINDER)
+                .setContentIntent(openAppIntent(context))
+                .setDeleteIntent(ackBreakPendingIntent(context))
+                .addAction(ackAction)
+                .setOngoing(isLongBreak)
+                .setAutoCancel(!isLongBreak)
+                .build()
+            context.getSystemService(NotificationManager::class.java).notify(BUZZ_ID, notification)
+
+            if (isLongBreak) {
+                startStrictAlarm(context.applicationContext)
+            }
+        }
+
+        /** Starts a repeating strong vibration + tone loop for Long Breaks until acknowledged or cleared by PC idle. */
+        private fun startStrictAlarm(appContext: Context) {
+            stopStrictAlarm()
+            strictAlarmActive = true
+            notifyUi()
+            var cycles = 0
+            val task = object : Runnable {
+                override fun run() {
+                    if (!strictAlarmActive || cycles >= STRICT_MAX_CYCLES) {
+                        stopStrictAlarm()
+                        return
+                    }
+                    cycles += 1
+                    pulseStrictFeedback(appContext)
+                    mainHandler.postDelayed(this, STRICT_INTERVAL_MS)
+                }
+            }
+            strictRunnable = task
+            mainHandler.post(task)
+        }
+
+        private fun pulseStrictFeedback(context: Context) {
+            try {
+                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Vibrator::class.java)
+                }
+                vibrator?.vibrate(VibrationEffect.createWaveform(BUZZ_VIBRATION, -1))
+            } catch (_: Exception) {
+            }
+            try {
+                if (activeRingtone?.isPlaying != true) {
+                    val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    activeRingtone = RingtoneManager.getRingtone(context, uri)?.also { it.play() }
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        /** Stops any active repeating Long Break alarm loop. */
+        fun stopStrictAlarm() {
+            strictAlarmActive = false
+            strictRunnable?.let { mainHandler.removeCallbacks(it) }
+            strictRunnable = null
+            try {
+                activeRingtone?.stop()
+            } catch (_: Exception) {
+            }
+            activeRingtone = null
+            notifyUi()
+        }
+
+        /** Stops the strict alarm and dismisses the break notification (called from phone tap or PC idle clear). */
+        fun acknowledgeBreak(context: Context) {
+            stopStrictAlarm()
+            context.getSystemService(NotificationManager::class.java)?.cancel(BUZZ_ID)
+            notifyUi()
+        }
+
+        /** Fires a local Quick Stretch test buzz on the phone to verify notification and vibration settings. */
+        fun triggerLocalTest(context: Context) {
+            val nowSecs = System.currentTimeMillis() / 1000
+            val buzz = Buzz(
+                id = "local-$nowSecs",
+                timeSecs = nowSecs,
+                title = context.getString(R.string.local_test_title),
+                text = context.getString(R.string.local_test_body),
+            )
+            Store.recordBuzz(context, buzz)
+            postBuzzNotification(context, buzz)
+            notifyUi()
+        }
+
+        /** Fires a local Strict Long-Break test alarm so the user can test repeating vibration + stop controls. */
+        fun triggerStrictTest(context: Context) {
+            val nowSecs = System.currentTimeMillis() / 1000
+            val buzz = Buzz(
+                id = "strict-$nowSecs",
+                timeSecs = nowSecs,
+                title = context.getString(R.string.strict_test_title),
+                text = context.getString(R.string.strict_test_body),
+            )
+            Store.recordBuzz(context, buzz)
+            postBuzzNotification(context, buzz)
+            notifyUi()
+        }
+
         /** Starts the listener as a foreground service. */
         fun start(context: Context) {
             context.startForegroundService(Intent(context, ListenerService::class.java))
+        }
+
+        /** Forces the listener service to reconnect its stream immediately. */
+        fun reconnect(context: Context) {
+            val intent = Intent(context, ListenerService::class.java).putExtra(EXTRA_RECONNECT, true)
+            context.startForegroundService(intent)
         }
 
         /** Stops the listener. */

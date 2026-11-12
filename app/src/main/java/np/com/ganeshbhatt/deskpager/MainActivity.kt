@@ -20,11 +20,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.Date
 
-/** The single dashboard screen: shows live connection readiness and pairs or unpairs this phone. */
+/** The single dashboard screen: shows live connection readiness, reminder history, and pairing controls. */
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var channelInfo: TextView
     private lateinit var lastBuzz: TextView
+    private lateinit var statStretches: TextView
+    private lateinit var statLongBreaks: TextView
+    private lateinit var stopAlarmBtn: Button
     private lateinit var pairedActions: LinearLayout
     private lateinit var pairCard: LinearLayout
     private lateinit var error: TextView
@@ -38,7 +41,7 @@ class MainActivity : Activity() {
     /** True while a code filled in by a link is waiting for the user to confirm it. */
     private var linkPending = false
 
-    /** True when the user tapped "Switch pairing code" while already paired. */
+    /** True when the user tapped "Switch Code" while already paired. */
     private var editingCode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +50,9 @@ class MainActivity : Activity() {
         status = findViewById(R.id.status)
         channelInfo = findViewById(R.id.channel_info)
         lastBuzz = findViewById(R.id.last_buzz)
+        statStretches = findViewById(R.id.stat_stretches)
+        statLongBreaks = findViewById(R.id.stat_long_breaks)
+        stopAlarmBtn = findViewById(R.id.stop_alarm_btn)
         pairedActions = findViewById(R.id.paired_actions)
         pairCard = findViewById(R.id.pair_card)
         error = findViewById(R.id.error)
@@ -59,6 +65,12 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.pair).setOnClickListener { pair(code.text.toString()) }
         findViewById<Button>(R.id.paste).setOnClickListener { pasteFromClipboard() }
+        findViewById<Button>(R.id.reconnect).setOnClickListener {
+            if (Store.topic(this) != null) {
+                ListenerService.reconnect(this)
+                refresh()
+            }
+        }
         findViewById<Button>(R.id.change_code).setOnClickListener {
             editingCode = true
             refresh()
@@ -77,6 +89,21 @@ class MainActivity : Activity() {
             code.text.clear()
             refresh()
         }
+        stopAlarmBtn.setOnClickListener {
+            ListenerService.acknowledgeBreak(this)
+            refresh()
+        }
+        findViewById<Button>(R.id.test_local).setOnClickListener {
+            ensureNotificationPermission()
+            ListenerService.triggerLocalTest(this)
+            refresh()
+        }
+        findViewById<Button>(R.id.test_strict).setOnClickListener {
+            ensureNotificationPermission()
+            ListenerService.triggerStrictTest(this)
+            refresh()
+        }
+        findViewById<View>(R.id.notif_row).setOnClickListener { openNotificationSettings() }
         batteryBtn.setOnClickListener { askForBackgroundUse() }
 
         // Not on recreation (rotation etc.): the launching link must not be replayed.
@@ -129,6 +156,14 @@ class MainActivity : Activity() {
         code.setSelection(code.text.length)
     }
 
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+    }
+
     private fun pair(input: String) {
         val topic = Ntfy.parsePairing(input)
         if (topic == null) {
@@ -142,11 +177,7 @@ class MainActivity : Activity() {
         // Restart so a re-pair switches to the new topic.
         ListenerService.stop(this)
         ListenerService.start(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-        }
+        ensureNotificationPermission()
         refresh()
     }
 
@@ -159,7 +190,6 @@ class MainActivity : Activity() {
             status.setBackgroundResource(R.drawable.bg_pill_warn)
             status.setTextColor(getColor(R.color.warn_fg))
             channelInfo.visibility = View.GONE
-            lastBuzz.visibility = View.GONE
             pairedActions.visibility = View.GONE
             pairCard.visibility = View.VISIBLE
             cancelPair.visibility = View.GONE
@@ -184,19 +214,26 @@ class MainActivity : Activity() {
             channelInfo.text = getString(R.string.channel_label, Ntfy.maskTopic(topic ?: ""))
             channelInfo.visibility = View.VISIBLE
 
-            val recent = Store.lastBuzz(this)
-            if (recent != null) {
-                val formattedTime = DateFormat.getTimeFormat(this).format(Date(recent.timeSecs * 1000L))
-                lastBuzz.text = getString(R.string.last_buzz_format, formattedTime, recent.text)
-            } else {
-                lastBuzz.setText(R.string.last_buzz_none)
-            }
-            lastBuzz.visibility = View.VISIBLE
-
             val showForm = editingCode || linkPending
             pairedActions.visibility = if (showForm) View.GONE else View.VISIBLE
             pairCard.visibility = if (showForm) View.VISIBLE else View.GONE
             cancelPair.visibility = if (showForm) View.VISIBLE else View.GONE
+        }
+
+        val stats = Store.stats(this)
+        statStretches.text = stats.quickStretches.toString()
+        statLongBreaks.text = stats.longBreaks.toString()
+        stopAlarmBtn.visibility = if (ListenerService.strictAlarmActive) View.VISIBLE else View.GONE
+
+        val history = Store.recentBuzzes(this)
+        if (history.isNotEmpty()) {
+            val timeFmt = DateFormat.getTimeFormat(this)
+            lastBuzz.text = history.joinToString("\n\n") { item ->
+                val t = timeFmt.format(Date(item.timeSecs * 1000L))
+                "• [$t] ${item.title}\n  ${item.text}"
+            }
+        } else {
+            lastBuzz.setText(R.string.last_buzz_none)
         }
 
         val notificationsOn = getSystemService(NotificationManager::class.java).areNotificationsEnabled()
@@ -226,6 +263,17 @@ class MainActivity : Activity() {
     private fun showError(textRes: Int) {
         error.setText(textRes)
         error.visibility = View.VISIBLE
+    }
+
+    private fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     private fun askForBackgroundUse() {
