@@ -1,4 +1,4 @@
-# Desk Pager for Android (`v0.3.0`)
+# Desk Pager for Android (`v0.4.0`)
 
 Companion Android receiver for [Desk Pager for Windows](https://github.com/bhattaganesh/desk-pager-windows). Delivers two-tier posture, eye-rest, and walk reminders over [ntfy.sh](https://ntfy.sh) (free, no account) with Multi-Laptop support (Home + Office) and a strict repeating Long-Break alarm that automatically stops when you step away from your PC.
 
@@ -7,10 +7,10 @@ Companion Android receiver for [Desk Pager for Windows](https://github.com/bhatt
 Desk Pager requires **both** this Android app on your phone and the Windows desktop application on your laptop(s). Multiple releases are available — always download the **latest version** from the links below:
 
 1. **Android Mobile Application (`desk-pager.apk`):**
-   - **Latest Release (`v0.3.0`):** [https://github.com/bhattaganesh/desk-pager-android/releases/latest](https://github.com/bhattaganesh/desk-pager-android/releases/latest)
+   - **Latest Release (`v0.4.0`):** [https://github.com/bhattaganesh/desk-pager-android/releases/latest](https://github.com/bhattaganesh/desk-pager-android/releases/latest)
    - **All Android Releases:** [https://github.com/bhattaganesh/desk-pager-android/releases](https://github.com/bhattaganesh/desk-pager-android/releases)
 2. **Companion Windows Desktop Application (`desk-pager.exe` — Required on your PC):**
-   - **Latest Release (`v0.4.0`):** [https://github.com/bhattaganesh/desk-pager-windows/releases/latest](https://github.com/bhattaganesh/desk-pager-windows/releases/latest)
+   - **Latest Release (`v0.5.0`):** [https://github.com/bhattaganesh/desk-pager-windows/releases/latest](https://github.com/bhattaganesh/desk-pager-windows/releases/latest)
    - **All Windows Releases:** [https://github.com/bhattaganesh/desk-pager-windows/releases](https://github.com/bhattaganesh/desk-pager-windows/releases)
 
 ---
