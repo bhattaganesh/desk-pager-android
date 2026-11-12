@@ -1,41 +1,40 @@
-# Desk Pager for Android
+# Desk Pager for Android (`v0.3.0`)
 
-Shows a buzz on your phone when the [Desk Pager Windows app](https://github.com/bhattaganesh/desk-pager-windows) decides you have been sitting too long.
-The two talk through [ntfy.sh](https://ntfy.sh) (free, no account).
+Companion Android receiver for [Desk Pager for Windows](https://github.com/bhattaganesh/desk-pager-windows). Delivers two-tier posture, eye-rest, and walk reminders over [ntfy.sh](https://ntfy.sh) (free, no account) with a strict repeating Long-Break alarm that automatically stops when you step away from your PC.
 
-## Use it
+## Quick Start
 
-1. Download `desk-pager.apk` from the latest release and install it. Android will ask you to allow installing from this source.
-2. On the PC, open the Desk Pager tray menu → **Pair phone…**.
-3. Pair the phone, either way:
-   - scan the QR code with the phone's camera, open the link in Desk Pager and tap **Pair Phone** to confirm, or
-   - copy the pairing code, send it to yourself, tap **Paste** in the app, and tap **Pair Phone**.
-4. Allow notifications when asked, and tap **Allow unrestricted battery** so buzzes arrive while the phone is idle. Once granted, the readiness card marks both as **Enabled**.
-5. On the PC: open Desk Pager (or right-click the tray icon) → **Send test buzz**. The phone should vibrate within a few seconds and display the latest buzz on the status card.
+1. Download `desk-pager.apk` from the [latest release](https://github.com/bhattaganesh/desk-pager-android/releases/latest) and install it on your phone (Android 8.0+).
+2. Open **Desk Pager** on your Windows PC and switch to the **Phone Pairing** tab.
+3. Pair your phone using either method:
+   - Scan the QR code with your phone camera, open the `deskpager://` link in Desk Pager, and tap **Pair Phone** to confirm, or
+   - Copy the `deskpager-…` secret code from your PC, tap **Paste** in the Android app, and tap **Pair Phone**.
+4. Grant **Notifications** and tap **Allow unrestricted battery** so reminders wake your phone reliably during Doze mode. Both badges under **Delivery Readiness** will show **Enabled**.
+5. Tap **Test Phone Vibration & Alert** (or **Test Strict Long-Break Alarm**) in the app to verify vibration and sound immediately.
 
-Needs Android 8.0 or newer.
+## Two-Tier Alert Channels & Strict Long-Break Alarm
 
-## How it works
+- **Tier 1 — Quick Stretch, Eye Rest & Water (`stretch` channel):**
+  - Delivers a high-priority notification with a gentle double-pulse vibration (`[0, 260, 150, 260]` ms) so you can stand briefly, stretch your spine, rest your eyes, and sip water right at your desk.
+- **Tier 2 — Long Break (`buzz` channel + Strict Repeating Alarm):**
+  - When you reach your 2-hour cumulative sitting limit, Desk Pager posts an ongoing alarm notification and runs a repeating multi-pulse vibration + alarm tone every 3.5 seconds until you **either**:
+    1. Tap **Taking Break (Stop Alarm)** on the notification,
+    2. Tap **Stop Break Alarm — I'm Taking My Break** inside the Android app, **or**
+    3. Simply walk away from your Windows PC for **30+ seconds** (or lock your PC) — the Windows app automatically sends a `deskpager-clear` signal that stops your phone alarm hands-free!
+- **Activity Counters & Recent History:**
+  - Tracks total **Quick Stretches** and **Long Breaks** alongside the last 5 reminders received with timestamps.
 
-- A foreground service keeps one streaming HTTPS connection open to the paired ntfy topic. That is why a permanent "Listening for buzzes" notification is shown.
-- Each message becomes a high-priority notification with vibration. Messages older than 10 minutes are dropped.
-- The service restarts after a reboot and reconnects with backoff (5 s up to 60 s) when the network drops.
-- It holds a partial wake lock while listening, which costs some battery. Push through Firebase would avoid that but needs a Google account and a backend.
+## Privacy & Security
 
-## Privacy and security
+- Your 128-bit pairing topic is stored in the app's private `SharedPreferences` (`Context.MODE_PRIVATE`), excluded from cloud backups and device transfer, Masked in the UI (`deskpager-••••••••••••<last4>`), and never written to logs.
+- Any incoming `deskpager://pair?topic=…` deep link requires explicit user confirmation (**Pair Phone**) before changing the active topic.
 
-- The pairing code is a random 128-bit ntfy topic. Anyone who has it can send buzzes to this phone, so don't share it.
-- It is stored in the app's private storage, excluded from backups, and never logged.
-- The app only talks to `https://ntfy.sh`. It collects nothing.
+## Build & Verify
 
-## Build
+Requires JDK 17+ (tested with JDK 21) and Android SDK platform 36:
 
-Needs JDK 17+ and the Android SDK (platform 36).
-
+```powershell
+.\gradlew testDebugUnitTest lintRelease assembleRelease
 ```
-./gradlew testDebugUnitTest lintRelease assembleRelease
-```
 
-The APK is `app/build/outputs/apk/release/app-release.apk`. Release signing is read from `~/.gradle/gradle.properties`
-(`DESKPAGER_KEYSTORE`, `DESKPAGER_KEYSTORE_PASSWORD`, `DESKPAGER_KEY_ALIAS`, `DESKPAGER_KEY_PASSWORD`); without them the
-build falls back to the debug key.
+The signed release APK is output to `app/build/outputs/apk/release/app-release.apk`. Release signing reads `DESKPAGER_KEYSTORE`, `DESKPAGER_KEYSTORE_PASSWORD`, `DESKPAGER_KEY_ALIAS`, and `DESKPAGER_KEY_PASSWORD` from `~/.gradle/gradle.properties` (falling back to debug signing if unset).
