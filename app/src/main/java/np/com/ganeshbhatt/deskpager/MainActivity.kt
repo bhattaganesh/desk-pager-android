@@ -40,8 +40,9 @@ class MainActivity : Activity() {
 
     /** True while a code filled in by a link is waiting for the user to confirm it. */
     private var linkPending = false
+    private var pendingPcName: String? = null
 
-    /** True when the user tapped "Switch Code" while already paired. */
+    /** True when the user tapped "+ Add PC" while already paired. */
     private var editingCode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,12 +139,13 @@ class MainActivity : Activity() {
      */
     private fun handleLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
-        val topic = Ntfy.parsePairing(link)
-        if (topic == null) {
+        val parsed = Ntfy.parsePairingWithName(link)
+        if (parsed == null) {
             showError(R.string.error_bad_code)
             return
         }
-        code.setText(topic)
+        code.setText(parsed.first)
+        pendingPcName = parsed.second
         linkPending = true
         editingCode = true
         refresh()
@@ -165,16 +167,17 @@ class MainActivity : Activity() {
     }
 
     private fun pair(input: String) {
-        val topic = Ntfy.parsePairing(input)
-        if (topic == null) {
+        val parsed = Ntfy.parsePairingWithName(input)
+        if (parsed == null) {
             showError(R.string.error_bad_code)
             return
         }
-        Store.setTopic(this, topic)
+        Store.addPc(this, parsed.first, parsed.second ?: pendingPcName)
+        pendingPcName = null
         linkPending = false
         editingCode = false
         code.text.clear()
-        // Restart so a re-pair switches to the new topic.
+        // Restart so the listener subscribes to all paired PCs simultaneously.
         ListenerService.stop(this)
         ListenerService.start(this)
         ensureNotificationPermission()
@@ -182,8 +185,8 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
-        val topic = Store.topic(this)
-        val paired = topic != null
+        val pcs = Store.pcs(this)
+        val paired = pcs.isNotEmpty()
 
         if (!paired) {
             status.setText(R.string.status_unpaired)
@@ -211,7 +214,9 @@ class MainActivity : Activity() {
                     status.setTextColor(getColor(R.color.success_fg))
                 }
             }
-            channelInfo.text = getString(R.string.channel_label, Ntfy.maskTopic(topic ?: ""))
+            channelInfo.text = pcs.joinToString("\n") { pc ->
+                "• ${pc.label}: ${Ntfy.maskTopic(pc.topic)}"
+            }
             channelInfo.visibility = View.VISIBLE
 
             val showForm = editingCode || linkPending

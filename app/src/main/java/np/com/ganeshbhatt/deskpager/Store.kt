@@ -4,16 +4,20 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** One paired Windows PC (e.g. Home Laptop or Office Laptop). */
+data class PairedPc(val topic: String, val label: String)
+
 /** Summary of a buzz shown on this phone. */
 data class LastBuzz(val title: String, val text: String, val timeSecs: Long)
 
 /** Counts of quick stretches and long breaks received on this phone. */
 data class BuzzStats(val quickStretches: Int, val longBreaks: Int)
 
-/** Keeps the pairing topic and recent buzz history in app-private storage (allowBackup is false). */
+/** Keeps paired PCs (supporting multiple laptops simultaneously) and recent buzz history in private storage. */
 object Store {
     private const val PREFS = "desk_pager"
     private const val KEY_TOPIC = "topic"
+    private const val KEY_PCS = "paired_pcs"
     private const val KEY_LAST_TITLE = "last_buzz_title"
     private const val KEY_LAST_TEXT = "last_buzz_text"
     private const val KEY_LAST_TIME = "last_buzz_time"
@@ -21,20 +25,78 @@ object Store {
     private const val KEY_STRETCH_COUNT = "stretch_count"
     private const val KEY_LONG_COUNT = "long_count"
     private const val MAX_HISTORY = 5
+    private const val MAX_PCS = 5
 
-    /** The paired topic, or null when the phone is not paired. */
-    fun topic(context: Context): String? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_TOPIC, null)
-
-    /** Saves the topic, or clears pairing and buzz history when [topic] is null. */
-    fun setTopic(context: Context, topic: String?) {
-        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-        if (topic == null) {
-            editor.clear()
-        } else {
-            editor.putString(KEY_TOPIC, topic)
+    /** Returns all paired PCs (migrating a legacy single-topic entry if present). */
+    fun pcs(context: Context): List<PairedPc> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_PCS, null)
+        if (raw != null) {
+            try {
+                val arr = JSONArray(raw)
+                val list = buildList {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val t = obj.optString("topic", "")
+                        val l = obj.optString("label", "PC ${i + 1}")
+                        if (Ntfy.parsePairing(t) != null) {
+                            add(PairedPc(t, l))
+                        }
+                    }
+                }
+                if (list.isNotEmpty()) return list
+            } catch (_: Exception) {
+            }
         }
-        editor.apply()
+        val legacy = prefs.getString(KEY_TOPIC, null)
+        return if (legacy != null && Ntfy.parsePairing(legacy) != null) {
+            listOf(PairedPc(legacy, "Laptop 1"))
+        } else {
+            emptyList()
+        }
+    }
+
+    /**
+     * Returns the comma-joined ntfy topic string for all paired PCs (e.g. `topic1,topic2`),
+     * or null when no PC is paired.
+     */
+    fun topic(context: Context): String? {
+        val list = pcs(context)
+        return if (list.isEmpty()) null else list.joinToString(",") { it.topic }
+    }
+
+    /**
+     * Adds a PC to the paired list (or updates its label if already paired), keeping up to [MAX_PCS] laptops
+     * active simultaneously so the user never has to re-enter codes when switching between Home and Office.
+     */
+    fun addPc(context: Context, topic: String, label: String?) {
+        val existing = pcs(context).toMutableList()
+        val existingIdx = existing.indexOfFirst { it.topic == topic }
+        val resolvedLabel = label?.takeIf { it.isNotBlank() }
+            ?: if (existingIdx >= 0) existing[existingIdx].label else "Laptop ${existing.size + 1}"
+        if (existingIdx >= 0) {
+            existing[existingIdx] = PairedPc(topic, resolvedLabel)
+        } else {
+            existing.add(PairedPc(topic, resolvedLabel))
+        }
+        val trimmed = existing.takeLast(MAX_PCS)
+        val arr = JSONArray()
+        for (pc in trimmed) {
+            arr.put(JSONObject().put("topic", pc.topic).put("label", pc.label))
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_PCS, arr.toString())
+            .putString(KEY_TOPIC, trimmed.last().topic)
+            .apply()
+    }
+
+    /** Clears all paired PCs and history when [topic] is null, or adds a PC when non-null. */
+    fun setTopic(context: Context, topic: String?) {
+        if (topic == null) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        } else {
+            addPc(context, topic, null)
+        }
     }
 
     /** Records the latest buzz shown to the user and updates the 5-item history and tier counters. */

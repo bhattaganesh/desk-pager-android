@@ -14,6 +14,7 @@ class NtfyTest {
         assertEquals(topic, Ntfy.parsePairing(topic))
         assertEquals(topic, Ntfy.parsePairing("  $topic\n"))
         assertEquals(topic, Ntfy.parsePairing("deskpager://pair?topic=$topic"))
+        assertEquals(Pair(topic, "YOGA-PC"), Ntfy.parsePairingWithName("deskpager://pair?topic=$topic&name=YOGA-PC"))
     }
 
     @Test

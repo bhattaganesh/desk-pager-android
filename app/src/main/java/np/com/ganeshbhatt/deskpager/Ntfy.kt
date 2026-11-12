@@ -17,14 +17,47 @@ object Ntfy {
 
     // Exactly what the Windows app generates, so the topic is always safe inside a URL path.
     private val TOPIC = Regex("^deskpager-[0-9a-f]{32}$")
+    private val SAFE_NAME = Regex("^[A-Za-z0-9 _.-]{1,28}$")
+
+    /**
+     * Extracts the topic and optional PC label from a pasted code or scanned `deskpager://` link.
+     *
+     * @return `Pair(topic, pcName?)`, or null when the input is not a valid Desk Pager pairing code.
+     */
+    fun parsePairingWithName(input: String): Pair<String, String?>? {
+        val raw = input.trim()
+        if (TOPIC.matches(raw)) {
+            return Pair(raw, null)
+        }
+        if (!raw.startsWith(PAIR_LINK_PREFIX)) {
+            return null
+        }
+        val query = raw.removePrefix(PAIR_LINK_PREFIX)
+        val parts = query.split("&")
+        val topicPart = parts.firstOrNull() ?: return null
+        if (!TOPIC.matches(topicPart)) {
+            return null
+        }
+        var pcName: String? = null
+        for (extra in parts.drop(1)) {
+            if (extra.startsWith("name=")) {
+                val candidate = extra.removePrefix("name=").trim()
+                if (SAFE_NAME.matches(candidate)) {
+                    pcName = candidate
+                }
+            } else {
+                return null
+            }
+        }
+        return Pair(topicPart, pcName)
+    }
 
     /**
      * Extracts the topic from a pasted pairing code or a scanned `deskpager://` link.
      *
      * @return the topic, or null when the input is not a Desk Pager pairing code.
      */
-    fun parsePairing(input: String): String? =
-        input.trim().removePrefix(PAIR_LINK_PREFIX).takeIf { TOPIC.matches(it) }
+    fun parsePairing(input: String): String? = parsePairingWithName(input)?.first
 
     /**
      * Formats a valid topic for on-screen display without exposing the full secret.
