@@ -10,6 +10,7 @@
     <string name="battery">Allow background use</string>
     <string name="battery_help">For buzzes to arrive while the phone is idle, allow Desk Pager to run without battery restrictions.</string>
     <string name="error_bad_code">That is not a Desk Pager pairing code. Copy it again from the Windows app.</string>
+    <string name="confirm_link">A pairing link filled in this code. Tap Pair only if you just scanned it from your own PC.</string>
     <string name="error_notifications">Notifications are off for Desk Pager, so buzzes cannot show. Turn them on in Settings.</string>
     <string name="channel_listening">Connection status</string>
     <string name="channel_buzz">Stand-up buzzes</string>

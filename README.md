@@ -8,7 +8,7 @@ The two talk through [ntfy.sh](https://ntfy.sh) (free, no account).
 1. Download `desk-pager.apk` from the latest release and install it. Android will ask you to allow installing from this source.
 2. On the PC, open the Desk Pager tray menu → **Pair phone…**.
 3. Pair the phone, either way:
-   - scan the QR code with the phone's camera and open the link in Desk Pager, or
+   - scan the QR code with the phone's camera, open the link in Desk Pager and tap **Pair** to confirm, or
    - copy the pairing code, send it to yourself, and paste it into the app, then tap **Pair**.
 4. Allow notifications when asked, and tap **Allow background use** so buzzes arrive while the phone is idle.
 5. On the PC: tray menu → **Send test buzz**. The phone should vibrate within a few seconds.

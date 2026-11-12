@@ -38,7 +38,10 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundUse() }
 
-        handleLink(intent)
+        // Not on recreation (rotation etc.): the launching link must not be replayed.
+        if (savedInstanceState == null) {
+            handleLink(intent)
+        }
         if (Store.topic(this) != null) {
             ListenerService.start(this)
         }
@@ -54,10 +57,20 @@ class MainActivity : Activity() {
         refresh()
     }
 
-    /** Pairs from a `deskpager://pair?topic=…` link opened by the camera or a browser. */
+    /**
+     * Fills the code field from a `deskpager://pair?topic=…` link; the user must still tap Pair.
+     *
+     * Any app or web page can fire this link, so it must never change the pairing by itself.
+     */
     private fun handleLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
-        pair(link)
+        val topic = Ntfy.parsePairing(link)
+        if (topic == null) {
+            showError(R.string.error_bad_code)
+            return
+        }
+        code.setText(topic)
+        showError(R.string.confirm_link)
     }
 
     private fun pair(input: String) {
