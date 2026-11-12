@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="brand">#2563EB</color>
+    <color name="brand_pressed">#1D4ED8</color>
+    <color name="bg_screen">#F4F6F9</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="bg_surface">#F1F5F9</color>
+    <color name="border_card">#E2E8F0</color>
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#475569</color>
+    <color name="success_bg">#DCFCE7</color>
+    <color name="success_fg">#15803D</color>
+    <color name="warn_bg">#FEF3C7</color>
+    <color name="warn_fg">#B45309</color>
+    <color name="error_bg">#FEE2E2</color>
     <color name="error">#B91C1C</color>
 </resources>

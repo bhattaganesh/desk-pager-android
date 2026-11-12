@@ -27,6 +27,11 @@ class NtfyTest {
     }
 
     @Test
+    fun masksTopicPreservingLastFourHexChars() {
+        assertEquals("deskpager-••••••••••••eeff", Ntfy.maskTopic(topic))
+    }
+
+    @Test
     fun parsesAMessageEvent() {
         val line = """{"id":"abc123","time":1794480000,"event":"message","topic":"t","title":"Time to stand up","message":"45 minutes"}"""
         assertEquals(Buzz("abc123", 1794480000, "Time to stand up", "45 minutes"), Ntfy.parseLine(line))

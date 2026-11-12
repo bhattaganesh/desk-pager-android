@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#3B82F6</color>
+    <color name="brand_pressed">#2563EB</color>
+    <color name="bg_screen">#0B0F17</color>
+    <color name="bg_card">#151C28</color>
+    <color name="bg_surface">#1E293B</color>
+    <color name="border_card">#263143</color>
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="success_bg">#193829</color>
+    <color name="success_fg">#4ADE80</color>
+    <color name="warn_bg">#3B2A14</color>
+    <color name="warn_fg">#FBBF24</color>
+    <color name="error_bg">#3B181E</color>
+    <color name="error">#F87171</color>
+</resources>

@@ -13,6 +13,7 @@ object Ntfy {
     const val MAX_BUZZ_AGE_SECS = 10 * 60L
     private const val MAX_TITLE_CHARS = 100
     private const val MAX_TEXT_CHARS = 500
+    private const val VISIBLE_SUFFIX_CHARS = 4
 
     // Exactly what the Windows app generates, so the topic is always safe inside a URL path.
     private val TOPIC = Regex("^deskpager-[0-9a-f]{32}$")
@@ -24,6 +25,18 @@ object Ntfy {
      */
     fun parsePairing(input: String): String? =
         input.trim().removePrefix(PAIR_LINK_PREFIX).takeIf { TOPIC.matches(it) }
+
+    /**
+     * Formats a valid topic for on-screen display without exposing the full secret.
+     *
+     * @return `deskpager-••••••••••••<last4>` so the user can verify the channel safely.
+     */
+    fun maskTopic(topic: String): String =
+        if (topic.length > VISIBLE_SUFFIX_CHARS) {
+            "deskpager-••••••••••••${topic.takeLast(VISIBLE_SUFFIX_CHARS)}"
+        } else {
+            "deskpager-••••"
+        }
 
     /**
      * Parses one line of the ntfy JSON stream.
