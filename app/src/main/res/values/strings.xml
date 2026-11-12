@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Desk Pager</string>
+    <string name="intro">Get a buzz on this phone when you have been sitting at your PC for too long.</string>
+    <string name="status_unpaired">Not paired yet.</string>
+    <string name="status_paired">Paired. Listening for buzzes in the background.</string>
+    <string name="code_label">Pairing code (paste it from the Windows app)</string>
+    <string name="pair">Pair</string>
+    <string name="unpair">Unpair</string>
+    <string name="battery">Allow background use</string>
+    <string name="battery_help">For buzzes to arrive while the phone is idle, allow Desk Pager to run without battery restrictions.</string>
+    <string name="error_bad_code">That is not a Desk Pager pairing code. Copy it again from the Windows app.</string>
+    <string name="error_notifications">Notifications are off for Desk Pager, so buzzes cannot show. Turn them on in Settings.</string>
+    <string name="channel_listening">Connection status</string>
+    <string name="channel_buzz">Stand-up buzzes</string>
+    <string name="state_connecting">Connecting…</string>
+    <string name="state_listening">Listening for buzzes</string>
+    <string name="state_reconnecting">No connection. Retrying…</string>
+    <string name="default_buzz_title">Time to stand up</string>
+</resources>
