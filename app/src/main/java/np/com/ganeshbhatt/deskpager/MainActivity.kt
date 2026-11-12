@@ -25,6 +25,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var channelInfo: TextView
     private lateinit var lastBuzz: TextView
+    private lateinit var latestSummary: TextView
+    private lateinit var historyToggleLabel: TextView
     private lateinit var statStretches: TextView
     private lateinit var statLongBreaks: TextView
     private lateinit var stopAlarmBtn: Button
@@ -45,12 +47,17 @@ class MainActivity : Activity() {
     /** True when the user tapped "+ Add PC" while already paired. */
     private var editingCode = false
 
+    /** Whether the 5-item recent history accordion is expanded. */
+    private var historyExpanded = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.status)
         channelInfo = findViewById(R.id.channel_info)
         lastBuzz = findViewById(R.id.last_buzz)
+        latestSummary = findViewById(R.id.latest_summary)
+        historyToggleLabel = findViewById(R.id.history_toggle_label)
         statStretches = findViewById(R.id.stat_stretches)
         statLongBreaks = findViewById(R.id.stat_long_breaks)
         stopAlarmBtn = findViewById(R.id.stop_alarm_btn)
@@ -63,6 +70,13 @@ class MainActivity : Activity() {
         batteryBadge = findViewById(R.id.battery_badge)
         batteryHelp = findViewById(R.id.battery_help)
         batteryBtn = findViewById(R.id.battery)
+
+        findViewById<View>(R.id.history_header).setOnClickListener {
+            if (Store.recentBuzzes(this).isNotEmpty()) {
+                historyExpanded = !historyExpanded
+                refresh()
+            }
+        }
 
         findViewById<Button>(R.id.pair).setOnClickListener { pair(code.text.toString()) }
         findViewById<Button>(R.id.paste).setOnClickListener { pasteFromClipboard() }
@@ -233,12 +247,23 @@ class MainActivity : Activity() {
         val history = Store.recentBuzzes(this)
         if (history.isNotEmpty()) {
             val timeFmt = DateFormat.getTimeFormat(this)
+            val newest = history.first()
+            val newestTime = timeFmt.format(Date(newest.timeSecs * 1000L))
+            latestSummary.text = "Latest: [$newestTime] ${newest.title}"
+            historyToggleLabel.text = getString(
+                if (historyExpanded) R.string.history_toggle_expanded else R.string.history_toggle_collapsed,
+                history.size,
+            )
+            historyToggleLabel.visibility = View.VISIBLE
             lastBuzz.text = history.joinToString("\n\n") { item ->
                 val t = timeFmt.format(Date(item.timeSecs * 1000L))
                 "• [$t] ${item.title}\n  ${item.text}"
             }
+            lastBuzz.visibility = if (historyExpanded) View.VISIBLE else View.GONE
         } else {
-            lastBuzz.setText(R.string.last_buzz_none)
+            latestSummary.setText(R.string.last_buzz_none)
+            historyToggleLabel.visibility = View.GONE
+            lastBuzz.visibility = View.GONE
         }
 
         val notificationsOn = getSystemService(NotificationManager::class.java).areNotificationsEnabled()

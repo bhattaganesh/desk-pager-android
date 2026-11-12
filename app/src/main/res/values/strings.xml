@@ -13,8 +13,10 @@
     <string name="stat_long_breaks_label">Long Breaks</string>
     <string name="ack_break_action">Taking Break (Stop Alarm)</string>
     <string name="stop_strict_alarm_btn">Stop Break Alarm — I\'m Taking My Break</string>
-    <string name="test_local_alert">Test Phone Vibration &amp; Alert</string>
-    <string name="test_strict_alarm">Test Strict Long-Break Alarm</string>
+    <string name="test_local_alert">Test Stretch Alert</string>
+    <string name="test_strict_alarm">Test Long-Break Alarm</string>
+    <string name="history_toggle_collapsed">Recent History (%1$d) ▾</string>
+    <string name="history_toggle_expanded">Hide History (%1$d) ▴</string>
     <string name="local_test_title">Quick stretch &amp; eye rest (Test)</string>
     <string name="local_test_body">Phone alert &amp; vibration are working! Stand up for 30s, stretch your spine, rest your eyes, and sip water.</string>
     <string name="strict_test_title">Time for a long break (Test)</string>
