@@ -22,6 +22,9 @@ class MainActivity : Activity() {
     private lateinit var code: EditText
     private lateinit var unpair: Button
 
+    /** True while a code filled in by a link is waiting for the user to confirm it. */
+    private var linkPending = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -34,6 +37,8 @@ class MainActivity : Activity() {
         unpair.setOnClickListener {
             ListenerService.stop(this)
             Store.setTopic(this, null)
+            linkPending = false
+            code.text.clear()
             refresh()
         }
         findViewById<Button>(R.id.battery).setOnClickListener { askForBackgroundUse() }
@@ -70,7 +75,8 @@ class MainActivity : Activity() {
             return
         }
         code.setText(topic)
-        showError(R.string.confirm_link)
+        linkPending = true
+        refresh()
     }
 
     private fun pair(input: String) {
@@ -80,6 +86,7 @@ class MainActivity : Activity() {
             return
         }
         Store.setTopic(this, topic)
+        linkPending = false
         code.text.clear()
         // Restart so a re-pair switches to the new topic.
         ListenerService.stop(this)
@@ -97,7 +104,9 @@ class MainActivity : Activity() {
         status.setText(if (paired) R.string.status_paired else R.string.status_unpaired)
         unpair.visibility = if (paired) View.VISIBLE else View.GONE
         val notificationsOff = !getSystemService(NotificationManager::class.java).areNotificationsEnabled()
-        if (paired && notificationsOff) {
+        if (linkPending) {
+            showError(R.string.confirm_link)
+        } else if (paired && notificationsOff) {
             showError(R.string.error_notifications)
         } else {
             error.visibility = View.GONE
