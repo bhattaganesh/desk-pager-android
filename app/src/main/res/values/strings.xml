@@ -11,16 +11,24 @@
     <string name="section_activity">Reminder Activity &amp; History</string>
     <string name="stat_stretches_label">Quick Stretches</string>
     <string name="stat_long_breaks_label">Long Breaks</string>
-    <string name="ack_break_action">Taking Break (Stop Alarm)</string>
-    <string name="stop_strict_alarm_btn">Stop Break Alarm — I\'m Taking My Break</string>
-    <string name="test_local_alert">Test Stretch Alert</string>
-    <string name="test_strict_alarm">Test Long-Break Alarm</string>
+    <string name="ack_break_action">Stop</string>
+    <string name="stop_strict_alarm_btn">Stop alert</string>
+    <string name="test_local_alert">Try quick stretch alert</string>
+    <string name="test_strict_alarm">Try long break alert</string>
+    <string name="stretch_style_label">Quick stretch alert</string>
+    <string name="long_break_style_label">Long break alert</string>
+    <!-- Same order as the AlertStyle enum. -->
+    <string-array name="alert_styles">
+        <item>Vibrate 3 times</item>
+        <item>Keep vibrating until I stop it</item>
+        <item>Keep ringing until I stop it</item>
+    </string-array>
     <string name="history_toggle_collapsed">Recent History (%1$d) ▾</string>
     <string name="history_toggle_expanded">Hide History (%1$d) ▴</string>
     <string name="local_test_title">Quick stretch &amp; eye rest (Test)</string>
-    <string name="local_test_body">Phone alert &amp; vibration are working! Stand up for 30s, stretch your spine, rest your eyes, and sip water.</string>
+    <string name="local_test_body">This is how a quick stretch reminder alerts you, using your “Quick stretch alert” setting.</string>
     <string name="strict_test_title">Time for a long break (Test)</string>
-    <string name="strict_test_body">Strict Long-Break alarm active! Tap Taking Break (or step away from your PC for 30s) to stop the repeating alarm.</string>
+    <string name="strict_test_body">This is how a long break reminder alerts you, using your “Long break alert” setting. If it keeps going, tap Stop.</string>
     <string name="section_permissions">Delivery Readiness</string>
     <string name="perm_notifications">Notifications (tap to configure)</string>
     <string name="perm_battery">Unrestricted background battery</string>
@@ -51,8 +59,7 @@
     <string name="remove_pc_message">This phone will stop receiving reminders from %1$s (%2$s). Other paired PCs, your history and your counters are kept.</string>
     <string name="error_notifications">Notifications are disabled for Desk Pager. Tap the Notifications row below to enable them.</string>
     <string name="channel_listening">Background connection</string>
-    <string name="channel_stretch">Quick stretch &amp; eye rest (gentle double-pulse)</string>
-    <string name="channel_buzz">Long walk break &amp; test alerts (triple-pulse)</string>
+    <string name="channel_alerts">Reminders (alert style is set inside the app)</string>
     <string name="state_listening">Connected · Reminders active</string>
     <string name="state_reconnecting">Offline · Waiting to reconnect…</string>
     <string name="default_buzz_title">Time to stand up</string>

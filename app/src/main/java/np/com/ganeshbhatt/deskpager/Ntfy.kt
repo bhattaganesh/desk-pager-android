@@ -6,6 +6,33 @@ import org.json.JSONObject
 /** One buzz received from the PC. */
 data class Buzz(val id: String, val timeSecs: Long, val title: String, val text: String)
 
+/** What a buzz is about, decided from its title alone. */
+enum class BuzzKind { LONG_BREAK, STRETCH, OTHER }
+
+/** How the phone gets the user's attention for a buzz. */
+enum class AlertStyle {
+    QUICK,
+    VIBRATE_UNTIL_STOPPED,
+    RING_UNTIL_STOPPED,
+    ;
+
+    /** Whether this style keeps going, and so needs a Stop control, rather than ending by itself. */
+    val untilStopped: Boolean get() = this != QUICK
+
+    /** Whether this style plays the alarm sound as well as vibrating. */
+    val rings: Boolean get() = this == RING_UNTIL_STOPPED
+
+    companion object {
+        /** Returns the style saved under its enum name, or [fallback] when [stored] is null or unknown. */
+        fun fromStored(stored: String?, fallback: AlertStyle = QUICK): AlertStyle =
+            entries.firstOrNull { it.name == stored } ?: fallback
+
+        /** Picks the style for [kind]: long breaks use [longBreak], everything else uses [stretch]. */
+        fun forKind(kind: BuzzKind, stretch: AlertStyle, longBreak: AlertStyle): AlertStyle =
+            if (kind == BuzzKind.LONG_BREAK) longBreak else stretch
+    }
+}
+
 /** Pure parsing and validation for everything that arrives from outside the app. */
 object Ntfy {
     const val SERVER = "https://ntfy.sh"
@@ -14,10 +41,23 @@ object Ntfy {
     private const val MAX_TITLE_CHARS = 100
     private const val MAX_TEXT_CHARS = 500
     private const val VISIBLE_SUFFIX_CHARS = 4
+    private const val LONG_BREAK_WORDS = "long break"
+    private const val STRETCH_WORD = "stretch"
 
     // Exactly what the Windows app generates, so the topic is always safe inside a URL path.
     private val TOPIC = Regex("^deskpager-[0-9a-f]{32}$")
     private val SAFE_NAME = Regex("^[A-Za-z0-9 _.-]{1,28}$")
+
+    /**
+     * Classifies a buzz by the words the Windows app puts in its title; a title with both is a long break.
+     *
+     * @return [BuzzKind.OTHER] for anything else, such as the PC's test buzz.
+     */
+    fun kindOf(title: String): BuzzKind = when {
+        title.contains(LONG_BREAK_WORDS, ignoreCase = true) -> BuzzKind.LONG_BREAK
+        title.contains(STRETCH_WORD, ignoreCase = true) -> BuzzKind.STRETCH
+        else -> BuzzKind.OTHER
+    }
 
     /** Whether [value] is exactly a bare topic (never a link), the only form allowed into storage or a URL. */
     fun isTopic(value: String): Boolean = TOPIC.matches(value)

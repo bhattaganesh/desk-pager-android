@@ -102,6 +102,10 @@ object Store {
     private const val KEY_HISTORY = "buzz_history"
     private const val KEY_STRETCH_COUNT = "stretch_count"
     private const val KEY_LONG_COUNT = "long_count"
+    private const val KEY_STRETCH_STYLE = "stretch_alert_style"
+    private const val KEY_LONG_BREAK_STYLE = "long_break_alert_style"
+    private val DEFAULT_STRETCH_STYLE = AlertStyle.QUICK
+    private val DEFAULT_LONG_BREAK_STYLE = AlertStyle.VIBRATE_UNTIL_STOPPED
     private const val MAX_HISTORY = 5
 
     /** Returns all paired PCs (migrating a legacy single-topic entry if present). */
@@ -169,10 +173,18 @@ object Store {
         editor.apply()
     }
 
-    /** Clears all paired PCs and history when [topic] is null, or adds a PC when non-null. */
+    /**
+     * Clears all paired PCs and history when [topic] is null, or adds a PC when non-null.
+     * The alert style settings are the user's preferences, not pairing data, so they are kept.
+     */
     fun setTopic(context: Context, topic: String?) {
         if (topic == null) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            // An editor applies clear() before its puts, whatever order they are written in.
+            prefs.edit().clear()
+                .putString(KEY_STRETCH_STYLE, prefs.getString(KEY_STRETCH_STYLE, null))
+                .putString(KEY_LONG_BREAK_STYLE, prefs.getString(KEY_LONG_BREAK_STYLE, null))
+                .apply()
         } else {
             addPc(context, topic, null)
         }
@@ -183,9 +195,7 @@ object Store {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val displayTitle = buzz.title.ifBlank { "Desk Pager" }
         val displayText = buzz.text.ifBlank { displayTitle }
-        val lower = displayTitle.lowercase()
-        val isQuick = lower.contains("stretch")
-        val isLong = lower.contains("long break")
+        val kind = Ntfy.kindOf(displayTitle)
 
         val history = recentBuzzes(context).toMutableList()
         history.add(0, LastBuzz(displayTitle, displayText, buzz.timeSecs))
@@ -206,12 +216,28 @@ object Store {
             .putLong(KEY_LAST_TIME, buzz.timeSecs)
             .putString(KEY_HISTORY, arr.toString())
 
-        if (isQuick) {
-            editor.putInt(KEY_STRETCH_COUNT, prefs.getInt(KEY_STRETCH_COUNT, 0) + 1)
-        } else if (isLong) {
-            editor.putInt(KEY_LONG_COUNT, prefs.getInt(KEY_LONG_COUNT, 0) + 1)
+        when (kind) {
+            BuzzKind.STRETCH -> editor.putInt(KEY_STRETCH_COUNT, prefs.getInt(KEY_STRETCH_COUNT, 0) + 1)
+            BuzzKind.LONG_BREAK -> editor.putInt(KEY_LONG_COUNT, prefs.getInt(KEY_LONG_COUNT, 0) + 1)
+            BuzzKind.OTHER -> Unit
         }
         editor.apply()
+    }
+
+    /** Returns the alert style the user chose for buzzes of [kind]; anything but a long break uses the stretch one. */
+    fun alertStyle(context: Context, kind: BuzzKind): AlertStyle {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return AlertStyle.forKind(
+            kind,
+            stretch = AlertStyle.fromStored(prefs.getString(KEY_STRETCH_STYLE, null), DEFAULT_STRETCH_STYLE),
+            longBreak = AlertStyle.fromStored(prefs.getString(KEY_LONG_BREAK_STYLE, null), DEFAULT_LONG_BREAK_STYLE),
+        )
+    }
+
+    /** Saves [style] as the long-break setting when [kind] is a long break, otherwise as the stretch setting. */
+    fun setAlertStyle(context: Context, kind: BuzzKind, style: AlertStyle) {
+        val key = if (kind == BuzzKind.LONG_BREAK) KEY_LONG_BREAK_STYLE else KEY_STRETCH_STYLE
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(key, style.name).apply()
     }
 
     /** Returns the most recent buzz recorded for this pairing, if any. */

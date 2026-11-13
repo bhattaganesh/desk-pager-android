@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -15,6 +16,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -89,7 +91,7 @@ class ListenerService : Service() {
     }
 
     override fun onDestroy() {
-        stopStrictAlarm()
+        stopAlert(this)
         worker?.stop()
         worker = null
         activeTopic = null
@@ -191,7 +193,6 @@ class ListenerService : Service() {
             } else {
                 Store.recordBuzz(this@ListenerService, buzz)
                 postBuzzNotification(this@ListenerService, buzz)
-                notifyUi()
             }
         }
     }
@@ -216,8 +217,8 @@ class ListenerService : Service() {
         private const val TAG = "DeskPager"
         private const val WAKE_LOCK_TAG = "DeskPager:listener"
         private const val CHANNEL_LISTENING = "listening"
-        private const val CHANNEL_STRETCH = "stretch"
-        private const val CHANNEL_BUZZ = "buzz"
+        private const val CHANNEL_ALERTS = "alerts"
+        private val RETIRED_CHANNELS = listOf("stretch", "buzz")
         private const val EXTRA_RECONNECT = "reconnect"
         private const val ACTION_ACK_BREAK = "np.com.ganeshbhatt.deskpager.ACTION_ACK_BREAK"
         private const val CLEAR_TITLE = "deskpager-clear"
@@ -228,13 +229,19 @@ class ListenerService : Service() {
         private const val READ_TIMEOUT_MS = 120_000
         private const val MIN_BACKOFF_MS = 5_000L
         private const val MAX_BACKOFF_MS = 60_000L
-        private const val STRICT_INTERVAL_MS = 3_500L
-        private const val STRICT_MAX_CYCLES = 40
-        private val STRETCH_VIBRATION = longArrayOf(0, 260, 150, 260)
-        private val BUZZ_VIBRATION = longArrayOf(0, 500, 180, 500, 180, 550)
+        // An unattended phone must not ring or vibrate forever.
+        private const val ALERT_CAP_MS = 10 * 60 * 1000L
+        private const val RING_CHECK_MS = 1_000L
+        private const val NO_REPEAT = -1
+        private const val REPEAT_FROM_START = 0
+        private val QUICK_VIBRATION = longArrayOf(0, 400, 200, 400, 200, 400)
+        private val CONTINUOUS_VIBRATION = longArrayOf(0, 700, 400)
         private val mainHandler = Handler(Looper.getMainLooper())
-        private var strictRunnable: Runnable? = null
-        private var activeRingtone: Ringtone? = null
+        private val alertLock = Any()
+        private var alertVibrator: Vibrator? = null
+        private var alertRingtone: Ringtone? = null
+        private var alertCap: Runnable? = null
+        private var ringCheck: Runnable? = null
 
         @Volatile
         var streamState: StreamState = StreamState.STOPPED
@@ -273,7 +280,10 @@ class ListenerService : Service() {
             )
         }
 
-        /** Ensures notification channels exist for background status, quick stretches, and long breaks. */
+        /**
+         * Ensures the status channel and the one alert channel exist. The alert channel is silent because
+         * the app vibrates and rings by itself, in the style the user chose; the older channels are removed.
+         */
         fun createChannels(context: Context) {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -285,117 +295,184 @@ class ListenerService : Service() {
             )
             manager.createNotificationChannel(
                 NotificationChannel(
-                    CHANNEL_STRETCH, context.getString(R.string.channel_stretch), NotificationManager.IMPORTANCE_HIGH,
+                    CHANNEL_ALERTS, context.getString(R.string.channel_alerts), NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    enableVibration(true)
-                    vibrationPattern = STRETCH_VIBRATION
+                    setSound(null, null)
+                    enableVibration(false)
                 },
             )
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_BUZZ, context.getString(R.string.channel_buzz), NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    enableVibration(true)
-                    vibrationPattern = BUZZ_VIBRATION
-                },
-            )
+            RETIRED_CHANNELS.forEach { manager.deleteNotificationChannel(it) }
         }
 
-        /** Posts a high-priority reminder notification and starts strict repeating alarm if it is a Long Break. */
+        /**
+         * Shows the reminder and alerts in the style set for its kind, replacing any alert still going.
+         *
+         * Only an alert that really keeps going gets the Stop action and stops when swiped away.
+         */
         fun postBuzzNotification(context: Context, buzz: Buzz) {
             createChannels(context)
-            val isLongBreak = buzz.title.contains("long break", ignoreCase = true)
-            val isQuickStretch = buzz.title.contains("stretch", ignoreCase = true)
-            val channel = if (isQuickStretch) CHANNEL_STRETCH else CHANNEL_BUZZ
+            val appContext = context.applicationContext
+            val style = Store.alertStyle(context, Ntfy.kindOf(buzz.title))
+            synchronized(alertLock) {
+                silence()
+                val keepsGoing = style.untilStopped && startContinuousAlert(appContext, style)
+                if (!style.untilStopped) {
+                    vibrate(appContext, VibrationEffect.createWaveform(QUICK_VIBRATION, NO_REPEAT), alarm = false)
+                }
+                context.getSystemService(NotificationManager::class.java)
+                    .notify(BUZZ_ID, buzzNotification(context, buzz, keepsGoing))
+            }
+            notifyUi()
+        }
 
-            val ackAction = Notification.Action.Builder(
-                null,
-                context.getString(R.string.ack_break_action),
-                ackBreakPendingIntent(context),
-            ).build()
-
-            val notification = Notification.Builder(context, channel)
+        private fun buzzNotification(context: Context, buzz: Buzz, keepsGoing: Boolean): Notification {
+            val builder = Notification.Builder(context, CHANNEL_ALERTS)
                 .setSmallIcon(R.drawable.ic_buzz)
                 .setContentTitle(buzz.title.ifBlank { context.getString(R.string.default_buzz_title) })
                 .setContentText(buzz.text)
                 .setStyle(Notification.BigTextStyle().bigText(buzz.text))
-                .setCategory(if (isLongBreak) Notification.CATEGORY_ALARM else Notification.CATEGORY_REMINDER)
+                .setCategory(if (keepsGoing) Notification.CATEGORY_ALARM else Notification.CATEGORY_REMINDER)
                 .setContentIntent(openAppIntent(context))
-                .setDeleteIntent(ackBreakPendingIntent(context))
-                .addAction(ackAction)
-                .setOngoing(isLongBreak)
-                .setAutoCancel(!isLongBreak)
-                .build()
-            context.getSystemService(NotificationManager::class.java).notify(BUZZ_ID, notification)
-
-            if (isLongBreak) {
-                startStrictAlarm(context.applicationContext)
+                .setAutoCancel(!keepsGoing)
+            if (keepsGoing) {
+                val stop = ackBreakPendingIntent(context)
+                builder.setDeleteIntent(stop).addAction(
+                    Notification.Action.Builder(null, context.getString(R.string.ack_break_action), stop).build(),
+                )
             }
+            return builder.build()
         }
 
-        /** Starts a repeating strong vibration + tone loop for Long Breaks until acknowledged or cleared by PC idle. */
-        private fun startStrictAlarm(appContext: Context) {
-            stopStrictAlarm()
-            strictAlarmActive = true
-            notifyUi()
-            var cycles = 0
-            val task = object : Runnable {
+        /**
+         * Starts the looping vibration, plus the looping alarm sound when [style] rings, and arms the cap.
+         *
+         * @return false, leaving nothing active, when neither vibration nor sound could start.
+         */
+        private fun startContinuousAlert(appContext: Context, style: AlertStyle): Boolean {
+            alertVibrator = vibrate(
+                appContext, VibrationEffect.createWaveform(CONTINUOUS_VIBRATION, REPEAT_FROM_START), alarm = true,
+            )
+            alertRingtone = if (style.rings) startRinging(appContext) else null
+            if (alertVibrator == null && alertRingtone == null) {
+                return false
+            }
+            val cap = object : Runnable {
                 override fun run() {
-                    if (!strictAlarmActive || cycles >= STRICT_MAX_CYCLES) {
-                        stopStrictAlarm()
-                        return
-                    }
-                    cycles += 1
-                    pulseStrictFeedback(appContext)
-                    mainHandler.postDelayed(this, STRICT_INTERVAL_MS)
+                    // A cap already replaced by a newer alert must not stop that alert.
+                    val current = synchronized(alertLock) { alertCap === this }
+                    if (current) stopAlert(appContext)
                 }
             }
-            strictRunnable = task
-            mainHandler.post(task)
+            alertCap = cap
+            mainHandler.postDelayed(cap, ALERT_CAP_MS)
+            strictAlarmActive = true
+            return true
         }
 
-        private fun pulseStrictFeedback(context: Context) {
-            try {
-                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        /**
+         * Vibrates with usage attributes, without which some phones mute vibration from the background.
+         *
+         * @return the vibrator now playing [effect], or null when the phone cannot or may not vibrate.
+         */
+        private fun vibrate(context: Context, effect: VibrationEffect, alarm: Boolean): Vibrator? {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Vibrator::class.java)
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) {
+                Log.w(TAG, "no vibrator available")
+                return null
+            }
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val usage = if (alarm) VibrationAttributes.USAGE_ALARM else VibrationAttributes.USAGE_NOTIFICATION
+                    vibrator.vibrate(effect, VibrationAttributes.createForUsage(usage))
                 } else {
+                    val usage = if (alarm) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION
                     @Suppress("DEPRECATION")
-                    context.getSystemService(Vibrator::class.java)
+                    vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(usage).build())
                 }
-                vibrator?.vibrate(VibrationEffect.createWaveform(BUZZ_VIBRATION, -1))
-            } catch (_: Exception) {
-            }
-            try {
-                if (activeRingtone?.isPlaying != true) {
-                    val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                    activeRingtone = RingtoneManager.getRingtone(context, uri)?.also { it.play() }
-                }
-            } catch (_: Exception) {
+                vibrator
+            } catch (e: SecurityException) {
+                Log.w(TAG, "vibration refused: ${e.javaClass.simpleName}")
+                null
             }
         }
 
-        /** Stops any active repeating Long Break alarm loop. */
-        fun stopStrictAlarm() {
+        /**
+         * Starts the default alarm sound (the notification sound when no alarm sound is set), looping.
+         *
+         * @return the playing ringtone, or null when there is no sound to play or it may not be played.
+         */
+        private fun startRinging(context: Context): Ringtone? {
+            val uri = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val ringtone = try {
+                RingtoneManager.getRingtone(context, uri)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "alarm sound refused: ${e.javaClass.simpleName}")
+                null
+            }
+            if (ringtone == null) {
+                Log.w(TAG, "no alarm sound available")
+                return null
+            }
+            ringtone.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                ringtone.isLooping = true
+            } else {
+                keepRinging(ringtone)
+            }
+            ringtone.play()
+            return ringtone
+        }
+
+        /** Restarts [ringtone] whenever it ends, for Android versions that cannot loop a ringtone. */
+        private fun keepRinging(ringtone: Ringtone) {
+            val check = object : Runnable {
+                override fun run() {
+                    synchronized(alertLock) {
+                        if (ringCheck !== this) return
+                        if (!ringtone.isPlaying) ringtone.play()
+                        mainHandler.postDelayed(this, RING_CHECK_MS)
+                    }
+                }
+            }
+            ringCheck = check
+            mainHandler.postDelayed(check, RING_CHECK_MS)
+        }
+
+        /** Stops vibration and sound and clears the active flag; callers hold [alertLock]. */
+        private fun silence() {
+            alertCap?.let { mainHandler.removeCallbacks(it) }
+            alertCap = null
+            ringCheck?.let { mainHandler.removeCallbacks(it) }
+            ringCheck = null
+            alertVibrator?.cancel()
+            alertVibrator = null
+            alertRingtone?.stop()
+            alertRingtone = null
             strictAlarmActive = false
-            strictRunnable?.let { mainHandler.removeCallbacks(it) }
-            strictRunnable = null
-            try {
-                activeRingtone?.stop()
-            } catch (_: Exception) {
+        }
+
+        /** Stops any alert that is still going and removes the reminder notification. */
+        fun stopAlert(context: Context) {
+            synchronized(alertLock) {
+                silence()
+                context.getSystemService(NotificationManager::class.java)?.cancel(BUZZ_ID)
             }
-            activeRingtone = null
             notifyUi()
         }
 
-        /** Stops the strict alarm and dismisses the break notification (called from phone tap or PC idle clear). */
-        fun acknowledgeBreak(context: Context) {
-            stopStrictAlarm()
-            context.getSystemService(NotificationManager::class.java)?.cancel(BUZZ_ID)
-            notifyUi()
-        }
+        /** Stops the alert on the user's say-so: the Stop action, a swipe, the in-app button, or the PC's clear. */
+        fun acknowledgeBreak(context: Context) = stopAlert(context)
 
-        /** Fires a local Quick Stretch test buzz on the phone to verify notification and vibration settings. */
+        /** Fires a local quick-stretch buzz so the user can try the style chosen for quick stretches. */
         fun triggerLocalTest(context: Context) {
             val nowSecs = System.currentTimeMillis() / 1000
             val buzz = Buzz(
@@ -406,10 +483,9 @@ class ListenerService : Service() {
             )
             Store.recordBuzz(context, buzz)
             postBuzzNotification(context, buzz)
-            notifyUi()
         }
 
-        /** Fires a local Strict Long-Break test alarm so the user can test repeating vibration + stop controls. */
+        /** Fires a local long-break buzz so the user can try the style chosen for long breaks. */
         fun triggerStrictTest(context: Context) {
             val nowSecs = System.currentTimeMillis() / 1000
             val buzz = Buzz(
@@ -420,7 +496,6 @@ class ListenerService : Service() {
             )
             Store.recordBuzz(context, buzz)
             postBuzzNotification(context, buzz)
-            notifyUi()
         }
 
         /** Starts the listener as a foreground service. */

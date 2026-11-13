@@ -17,9 +17,12 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.text.format.DateFormat
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import java.util.Date
 
@@ -140,6 +143,8 @@ class MainActivity : Activity() {
             ListenerService.triggerStrictTest(this)
             refresh()
         }
+        bindStyleSpinner(R.id.stretch_style, BuzzKind.STRETCH)
+        bindStyleSpinner(R.id.long_break_style, BuzzKind.LONG_BREAK)
         findViewById<View>(R.id.notif_row).setOnClickListener { openNotificationSettings() }
         batteryBtn.setOnClickListener { askForBackgroundUse() }
 
@@ -231,6 +236,24 @@ class MainActivity : Activity() {
         editingCode = true
         code.setText(parsed.first)
         refresh()
+    }
+
+    /** Shows the saved alert style for [kind] in a spinner and saves a new choice as soon as it is made. */
+    private fun bindStyleSpinner(spinnerId: Int, kind: BuzzKind) {
+        val spinner = findViewById<Spinner>(spinnerId)
+        spinner.adapter = ArrayAdapter.createFromResource(
+            this, R.array.alert_styles, android.R.layout.simple_spinner_item,
+        ).apply { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        spinner.setSelection(Store.alertStyle(this, kind).ordinal)
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                // The array lists the styles in enum order, so the position is the ordinal.
+                val style = AlertStyle.entries.getOrNull(position) ?: return
+                Store.setAlertStyle(this@MainActivity, kind, style)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     private fun pasteFromClipboard() {

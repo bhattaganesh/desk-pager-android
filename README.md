@@ -1,13 +1,13 @@
-# Desk Pager for Android (`v0.4.0`)
+# Desk Pager for Android (`v0.4.2`)
 
-Companion Android receiver for [Desk Pager for Windows](https://github.com/bhattaganesh/desk-pager-windows). Delivers two-tier posture, eye-rest, and walk reminders over [ntfy.sh](https://ntfy.sh) (free, no account) with Multi-Laptop support (Home + Office) and a strict repeating Long-Break alarm that automatically stops when you step away from your PC.
+Companion Android receiver for [Desk Pager for Windows](https://github.com/bhattaganesh/desk-pager-windows). Delivers two-tier posture, eye-rest, and walk reminders over [ntfy.sh](https://ntfy.sh) (free, no account) with Multi-Laptop support (Home + Office) and a choice of alert style per reminder type: three vibrations, or vibrating or ringing until you stop it.
 
 ## Required Downloads (Mobile + Desktop)
 
 Desk Pager requires **both** this Android app on your phone and the Windows desktop application on your laptop(s). Multiple releases are available — always download the **latest version** from the links below:
 
 1. **Android Mobile Application (`desk-pager.apk`):**
-   - **Latest Release (`v0.4.0`):** [https://github.com/bhattaganesh/desk-pager-android/releases/latest](https://github.com/bhattaganesh/desk-pager-android/releases/latest)
+   - **Latest Release (`v0.4.2`):** [https://github.com/bhattaganesh/desk-pager-android/releases/latest](https://github.com/bhattaganesh/desk-pager-android/releases/latest)
    - **All Android Releases:** [https://github.com/bhattaganesh/desk-pager-android/releases](https://github.com/bhattaganesh/desk-pager-android/releases)
 2. **Companion Windows Desktop Application (`desk-pager.exe` — Required on your PC):**
    - **Latest Release (`v0.5.0`):** [https://github.com/bhattaganesh/desk-pager-windows/releases/latest](https://github.com/bhattaganesh/desk-pager-windows/releases/latest)
@@ -25,17 +25,27 @@ Desk Pager requires **both** this Android app on your phone and the Windows desk
 4. **Pair Multiple Laptops (Home + Office):**
    - If you use both a Personal Laptop and an Office Laptop, tap **`+ Add PC`** on your phone and scan your second laptop's QR code. Both laptops remain connected simultaneously over a single stream — you never have to re-enter or switch codes.
 5. Grant **Notifications** and tap **Allow unrestricted battery** so reminders wake your phone reliably during Doze mode. Both badges under **Delivery Readiness** will show **Enabled**.
-6. Tap **Test Phone Vibration & Alert** (or **Test Strict Long-Break Alarm**) in the app to verify vibration and sound immediately.
+6. Pick a style under **Quick stretch alert** and **Long break alert**, then tap **Try quick stretch alert** or **Try long break alert** to feel exactly what each setting does.
 
-## Two-Tier Alert Channels & Strict Long-Break Alarm
+## Alert Styles
 
-- **Tier 1 — Quick Stretch, Eye Rest & Water (`stretch` channel):**
-  - Delivers a high-priority notification with a gentle double-pulse vibration (`[0, 260, 150, 260]` ms) so you can stand briefly, stretch your spine, rest your eyes, and sip water right at your desk.
-- **Tier 2 — Long Break (`buzz` channel + Strict Repeating Alarm):**
-  - When you reach your 2-hour cumulative sitting limit, Desk Pager posts an ongoing alarm notification and runs a repeating multi-pulse vibration + alarm tone every 3.5 seconds until you **either**:
-    1. Tap **Taking Break (Stop Alarm)** on the notification,
-    2. Tap **Stop Break Alarm — I'm Taking My Break** inside the Android app, **or**
-    3. Simply walk away from your Windows PC for **30+ seconds** (or lock your PC) — the Windows app automatically sends a `deskpager-clear` signal that stops your phone alarm hands-free!
+Each reminder type has its own setting on the main screen, with the same three choices:
+
+- **Vibrate 3 times:** three pulses, once. No Stop button; the notification clears when you tap it. Uses the notification vibration setting, so silent mode and Do Not Disturb are respected.
+- **Keep vibrating until I stop it:** vibrates continuously, as an alarm.
+- **Keep ringing until I stop it:** loops your default alarm sound (the notification sound if no alarm sound is set) and vibrates continuously.
+
+**Quick stretch alert** defaults to *Vibrate 3 times* and also applies to any other buzz, such as the PC's test buzz. **Long break alert** defaults to *Keep vibrating until I stop it*.
+
+An alert that keeps going stops when you do any of these:
+
+1. Tap **Stop** on the notification, or swipe the notification away,
+2. Tap **Stop alert** inside the Android app,
+3. Walk away from your Windows PC for **30+ seconds** (or lock it), which makes the Windows app send a `deskpager-clear` signal, or
+4. Leave it for 10 minutes, after which it stops by itself.
+
+Reminders use a single silent notification channel; the app does the vibrating and ringing itself so the chosen style is what you get.
+
 - **Activity Counters & Recent History:**
   - Tracks total **Quick Stretches** and **Long Breaks** alongside the last 5 reminders received with timestamps.
 
