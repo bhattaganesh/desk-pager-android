@@ -34,11 +34,9 @@ enum class StreamState {
 
 /** Foreground service that holds a streaming connection to the ntfy topic and shows each buzz. */
 class ListenerService : Service() {
-    @Volatile private var running = false
-    @Volatile private var activeTopic: String? = null
+    private var activeTopic: String? = null
     @Volatile private var currentStateRes: Int = R.string.state_listening
-    @Volatile private var connection: HttpURLConnection? = null
-    private var worker: Thread? = null
+    private var worker: StreamWorker? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -46,30 +44,15 @@ class ListenerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_ACK_BREAK) {
             acknowledgeBreak(this)
-            if (Store.topic(this) == null) {
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            return START_STICKY
         }
         val topic = Store.topic(this)
-        if (topic == null) {
+        if (topic == null || !enterForeground()) {
             stopSelf()
             return START_NOT_STICKY
         }
-        createChannels(this)
-        val notification = listeningNotification(currentStateRes)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(LISTENING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(LISTENING_ID, notification)
-        }
         val forceReconnect = intent?.getBooleanExtra(EXTRA_RECONNECT, false) == true
         if (worker == null || activeTopic != topic || forceReconnect) {
-            running = false
-            connection?.disconnect()
-            worker?.interrupt()
-            running = true
+            worker?.stop()
             activeTopic = topic
             if (wakeLock?.isHeld != true) {
                 // Keeps the socket reader alive across Doze when no FCM backend is used.
@@ -78,74 +61,138 @@ class ListenerService : Service() {
                     .apply { acquire() }
             }
             publishStreamState(StreamState.CONNECTING)
-            worker = thread(name = "desk-pager-listener") { listen(topic) }
+            worker = StreamWorker(topic).also { it.start() }
         }
         return START_STICKY
     }
 
+    /**
+     * Puts the service in the foreground with the status notification.
+     *
+     * @return false when Android refuses, which leaves nothing this service is allowed to keep running for.
+     */
+    private fun enterForeground(): Boolean {
+        createChannels(this)
+        val notification = listeningNotification(currentStateRes)
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(LISTENING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(LISTENING_ID, notification)
+            }
+            true
+        } catch (e: IllegalStateException) {
+            // Android 12+ throws this when a background start (e.g. a notification dismissal) may not go foreground.
+            Log.w(TAG, "foreground start refused: ${e.javaClass.simpleName}")
+            worker != null
+        }
+    }
+
     override fun onDestroy() {
         stopStrictAlarm()
-        running = false
-        activeTopic = null
-        connection?.disconnect()
-        worker?.interrupt()
+        worker?.stop()
         worker = null
+        activeTopic = null
         wakeLock?.takeIf { it.isHeld }?.release()
         publishStreamState(StreamState.STOPPED)
         super.onDestroy()
     }
 
-    /** Reads the topic's JSON stream until the service stops, reconnecting with backoff. */
-    private fun listen(topic: String) {
-        var backoffMs = MIN_BACKOFF_MS
-        var since = (System.currentTimeMillis() / 1000).toString()
-        while (running && activeTopic == topic) {
-            try {
-                val conn = (URL("${Ntfy.SERVER}/$topic/json?since=$since").openConnection() as HttpURLConnection)
-                connection = conn
-                conn.useCaches = false
-                conn.connectTimeout = CONNECT_TIMEOUT_MS
-                conn.readTimeout = READ_TIMEOUT_MS
-                if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                    throw IOException("HTTP ${conn.responseCode}")
-                }
-                setState(R.string.state_listening)
-                publishStreamState(StreamState.CONNECTED)
-                backoffMs = MIN_BACKOFF_MS
-                conn.inputStream.bufferedReader().useLines { lines ->
-                    for (line in lines) {
-                        if (!running || activeTopic != topic) break
-                        setState(R.string.state_listening)
-                        publishStreamState(StreamState.CONNECTED)
-                        val buzz = Ntfy.parseLine(line) ?: continue
-                        since = buzz.id
-                        if (Ntfy.isFresh(buzz, System.currentTimeMillis() / 1000)) {
-                            if (buzz.title.equals(CLEAR_TITLE, ignoreCase = true)) {
-                                acknowledgeBreak(this)
-                            } else {
-                                Store.recordBuzz(this, buzz)
-                                postBuzzNotification(this, buzz)
-                                notifyUi()
+    /**
+     * One reader of the JSON stream for [topic], with its own thread, connection and stop flag.
+     *
+     * Nothing here is shared with the worker that replaces it, so a replaced worker cannot close its
+     * successor's connection, and after [stop] returns it cannot show a buzz or publish a state.
+     */
+    private inner class StreamWorker(private val topic: String) {
+        @Volatile private var stopped = false
+        @Volatile private var connection: HttpURLConnection? = null
+        private val reader = thread(start = false, name = "desk-pager-listener") { listen() }
+
+        /** Starts reading the stream on this worker's own thread. */
+        fun start() {
+            reader.start()
+        }
+
+        /** Ends this worker for good and closes its connection so a blocked read returns. */
+        fun stop() {
+            synchronized(this) { stopped = true }
+            connection?.disconnect()
+            reader.interrupt()
+        }
+
+        /** Runs [action] unless this worker was stopped; [stop] waits for an action already under way. */
+        private inline fun ifLive(action: () -> Unit): Boolean = synchronized(this) {
+            if (!stopped) action()
+            !stopped
+        }
+
+        /** Reads the topic's JSON stream until this worker is stopped, reconnecting with backoff. */
+        private fun listen() {
+            var backoffMs = MIN_BACKOFF_MS
+            var since = (System.currentTimeMillis() / 1000).toString()
+            while (!stopped) {
+                try {
+                    val conn = URL("${Ntfy.SERVER}/$topic/json?since=$since").openConnection() as HttpURLConnection
+                    connection = conn
+                    // stop() may have looked for the connection just before it was stored above.
+                    if (stopped) break
+                    conn.useCaches = false
+                    conn.connectTimeout = CONNECT_TIMEOUT_MS
+                    conn.readTimeout = READ_TIMEOUT_MS
+                    if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                        throw IOException("HTTP ${conn.responseCode}")
+                    }
+                    backoffMs = MIN_BACKOFF_MS
+                    conn.inputStream.bufferedReader().useLines { lines ->
+                        var live = ifLive { showConnected() }
+                        val iterator = lines.iterator()
+                        while (live && iterator.hasNext()) {
+                            val buzz = Ntfy.parseLine(iterator.next())
+                            live = ifLive {
+                                showConnected()
+                                if (buzz != null) {
+                                    since = buzz.id
+                                    deliver(buzz)
+                                }
                             }
                         }
                     }
+                } catch (e: IOException) {
+                    // Class name only: the exception message can contain the URL, which holds the topic.
+                    Log.w(TAG, "stream dropped: ${e.javaClass.simpleName}")
+                } finally {
+                    connection?.disconnect()
+                    connection = null
                 }
-            } catch (e: IOException) {
-                // Class name only: the exception message can contain the URL, which holds the topic.
-                Log.w(TAG, "stream dropped: ${e.javaClass.simpleName}")
-            } finally {
-                connection?.disconnect()
-                connection = null
+                val live = ifLive {
+                    setState(R.string.state_reconnecting)
+                    publishStreamState(StreamState.RECONNECTING)
+                }
+                if (!live) break
+                try {
+                    Thread.sleep(backoffMs)
+                } catch (e: InterruptedException) {
+                    break
+                }
+                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
             }
-            if (!running || activeTopic != topic) break
-            setState(R.string.state_reconnecting)
-            publishStreamState(StreamState.RECONNECTING)
-            try {
-                Thread.sleep(backoffMs)
-            } catch (e: InterruptedException) {
-                break
+        }
+
+        private fun showConnected() {
+            setState(R.string.state_listening)
+            publishStreamState(StreamState.CONNECTED)
+        }
+
+        private fun deliver(buzz: Buzz) {
+            if (!Ntfy.isFresh(buzz, System.currentTimeMillis() / 1000)) return
+            if (buzz.title.equals(CLEAR_TITLE, ignoreCase = true)) {
+                acknowledgeBreak(this@ListenerService)
+            } else {
+                Store.recordBuzz(this@ListenerService, buzz)
+                postBuzzNotification(this@ListenerService, buzz)
+                notifyUi()
             }
-            backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
     }
 

@@ -2,6 +2,7 @@ package np.com.ganeshbhatt.deskpager
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
@@ -12,6 +13,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.text.format.DateFormat
 import android.view.View
 import android.widget.Button
@@ -23,7 +26,7 @@ import java.util.Date
 /** The single dashboard screen: shows live connection readiness, reminder history, and pairing controls. */
 class MainActivity : Activity() {
     private lateinit var status: TextView
-    private lateinit var channelInfo: TextView
+    private lateinit var pcList: LinearLayout
     private lateinit var lastBuzz: TextView
     private lateinit var latestSummary: TextView
     private lateinit var historyToggleLabel: TextView
@@ -40,9 +43,19 @@ class MainActivity : Activity() {
     private lateinit var batteryHelp: TextView
     private lateinit var batteryBtn: Button
 
-    /** True while a code filled in by a link is waiting for the user to confirm it. */
-    private var linkPending = false
+    /** The topic a link put in the code field, until the user pairs, cancels, unpairs or edits it away. */
+    private var linkedTopic: String? = null
+
+    /** The PC name that came with [linkedTopic]; never applied to any other code. */
     private var pendingPcName: String? = null
+
+    /** An error that stays on screen until the user's next action. */
+    private var notice: String? = null
+
+    /** True while Android puts the saved text back into the code field, which is not a user edit. */
+    private var restoringViews = false
+    private var shownPcs: List<PairedPc>? = null
+    private var removeDialog: AlertDialog? = null
 
     /** True when the user tapped "+ Add PC" while already paired. */
     private var editingCode = false
@@ -54,7 +67,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.status)
-        channelInfo = findViewById(R.id.channel_info)
+        pcList = findViewById(R.id.pc_list)
         lastBuzz = findViewById(R.id.last_buzz)
         latestSummary = findViewById(R.id.latest_summary)
         historyToggleLabel = findViewById(R.id.history_toggle_label)
@@ -70,6 +83,18 @@ class MainActivity : Activity() {
         batteryBadge = findViewById(R.id.battery_badge)
         batteryHelp = findViewById(R.id.battery_help)
         batteryBtn = findViewById(R.id.battery)
+
+        // Restored first so the link warning comes back together with the code Android refills below.
+        linkedTopic = savedInstanceState?.getString(STATE_LINKED_TOPIC)?.takeIf { Ntfy.isTopic(it) }
+        pendingPcName = savedInstanceState?.getString(STATE_PENDING_NAME)
+        notice = savedInstanceState?.getString(STATE_NOTICE)
+        code.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(s: Editable?) = onCodeEdited(s?.toString().orEmpty())
+        })
 
         findViewById<View>(R.id.history_header).setOnClickListener {
             if (Store.recentBuzzes(this).isNotEmpty()) {
@@ -88,20 +113,17 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.change_code).setOnClickListener {
             editingCode = true
+            notice = null
             refresh()
         }
         cancelPair.setOnClickListener {
-            editingCode = false
-            linkPending = false
-            code.text.clear()
+            closePairForm()
             refresh()
         }
         findViewById<Button>(R.id.unpair).setOnClickListener {
             ListenerService.stop(this)
             Store.setTopic(this, null)
-            linkPending = false
-            editingCode = false
-            code.text.clear()
+            closePairForm()
             refresh()
         }
         stopAlarmBtn.setOnClickListener {
@@ -146,6 +168,49 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_LINKED_TOPIC, linkedTopic)
+        outState.putString(STATE_PENDING_NAME, pendingPcName)
+        outState.putString(STATE_NOTICE, notice)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        restoringViews = true
+        try {
+            super.onRestoreInstanceState(savedInstanceState)
+        } finally {
+            restoringViews = false
+        }
+    }
+
+    override fun onDestroy() {
+        removeDialog?.dismiss()
+        super.onDestroy()
+    }
+
+    /** Ends the link-pending state once the user changes the code away from what the link filled in. */
+    private fun onCodeEdited(text: String) {
+        if (restoringViews) return
+        val linkStillShown = linkedTopic == null || text.trim() == linkedTopic
+        if (linkStillShown && notice == null) return
+        if (!linkStillShown) {
+            linkedTopic = null
+            pendingPcName = null
+        }
+        notice = null
+        refresh()
+    }
+
+    /** Leaves the pairing form and forgets everything a link or a failed attempt left in it. */
+    private fun closePairForm() {
+        editingCode = false
+        linkedTopic = null
+        pendingPcName = null
+        notice = null
+        code.text.clear()
+    }
+
     /**
      * Fills the code field from a `deskpager://pair?topic=…` link; the user must still tap Pair.
      *
@@ -155,13 +220,16 @@ class MainActivity : Activity() {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
         val parsed = Ntfy.parsePairingWithName(link)
         if (parsed == null) {
-            showError(R.string.error_bad_code)
+            notice = getString(R.string.error_bad_code)
+            refresh()
             return
         }
-        code.setText(parsed.first)
+        // Set before the text so the edit watcher sees the field matching the link.
+        linkedTopic = parsed.first
         pendingPcName = parsed.second
-        linkPending = true
+        notice = null
         editingCode = true
+        code.setText(parsed.first)
         refresh()
     }
 
@@ -183,19 +251,84 @@ class MainActivity : Activity() {
     private fun pair(input: String) {
         val parsed = Ntfy.parsePairingWithName(input)
         if (parsed == null) {
-            showError(R.string.error_bad_code)
+            notice = getString(R.string.error_bad_code)
+            refresh()
             return
         }
-        Store.addPc(this, parsed.first, parsed.second ?: pendingPcName)
-        pendingPcName = null
-        linkPending = false
-        editingCode = false
-        code.text.clear()
+        val label = parsed.second ?: pendingPcName.takeIf { parsed.first == linkedTopic }
+        if (!Store.addPc(this, parsed.first, label)) {
+            notice = getString(R.string.error_max_pcs, PcList.MAX_PCS)
+            refresh()
+            return
+        }
+        closePairForm()
         // Restart so the listener subscribes to all paired PCs simultaneously.
         ListenerService.stop(this)
         ListenerService.start(this)
         ensureNotificationPermission()
         refresh()
+    }
+
+    private fun confirmRemove(pc: PairedPc) {
+        removeDialog?.dismiss()
+        removeDialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.remove_pc_title, pc.label))
+            .setMessage(getString(R.string.remove_pc_message, pc.label, Ntfy.maskTopic(pc.topic)))
+            .setPositiveButton(R.string.remove_pc) { _, _ -> removePc(pc) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun removePc(pc: PairedPc) {
+        Store.removePc(this, pc.topic)
+        notice = null
+        if (Store.topic(this) == null) {
+            ListenerService.stop(this)
+        } else {
+            // The service swaps its stream when the paired topics differ from the ones it is reading.
+            ListenerService.start(this)
+        }
+        refresh()
+    }
+
+    private fun showPcs(pcs: List<PairedPc>) {
+        if (pcs == shownPcs) return
+        shownPcs = pcs
+        pcList.removeAllViews()
+        for (pc in pcs) {
+            val row = layoutInflater.inflate(R.layout.row_pc, pcList, false)
+            row.findViewById<TextView>(R.id.pc_label).text =
+                getString(R.string.pc_row, pc.label, Ntfy.maskTopic(pc.topic))
+            row.findViewById<Button>(R.id.pc_remove).apply {
+                contentDescription = getString(R.string.remove_pc_description, pc.label)
+                setOnClickListener { confirmRemove(pc) }
+            }
+            pcList.addView(row)
+        }
+    }
+
+    /**
+     * Describes what tapping Pair will do with the code a link filled in: the PC it adds, under which
+     * name, next to how many others. Null when no link is waiting.
+     */
+    private fun linkWarning(pcs: List<PairedPc>): String? {
+        val topic = linkedTopic ?: return null
+        val intro = getString(R.string.confirm_link_intro, getString(R.string.pair))
+        val masked = Ntfy.maskTopic(topic)
+        val wanted = pendingPcName
+        // The same rule Store.addPc applies, so the name shown is the name that gets saved.
+        val label = PcList.add(pcs, topic, wanted)?.first { it.topic == topic }?.label
+        val detail = when {
+            label == null -> getString(R.string.confirm_link_full, pcs.size)
+            pcs.any { it.topic == topic } -> getString(R.string.confirm_link_already_paired, masked, label)
+            else -> getString(R.string.confirm_link_add, label, masked, pcs.size)
+        }
+        val clash = if (label != null && wanted != null && label != wanted) {
+            getString(R.string.confirm_link_label_clash, wanted, label)
+        } else {
+            null
+        }
+        return listOfNotNull(intro, detail, clash).joinToString("\n\n")
     }
 
     private fun refresh() {
@@ -206,7 +339,7 @@ class MainActivity : Activity() {
             status.setText(R.string.status_unpaired)
             status.setBackgroundResource(R.drawable.bg_pill_warn)
             status.setTextColor(getColor(R.color.warn_fg))
-            channelInfo.visibility = View.GONE
+            pcList.visibility = View.GONE
             pairedActions.visibility = View.GONE
             pairCard.visibility = View.VISIBLE
             cancelPair.visibility = View.GONE
@@ -228,12 +361,10 @@ class MainActivity : Activity() {
                     status.setTextColor(getColor(R.color.success_fg))
                 }
             }
-            channelInfo.text = pcs.joinToString("\n") { pc ->
-                "• ${pc.label}: ${Ntfy.maskTopic(pc.topic)}"
-            }
-            channelInfo.visibility = View.VISIBLE
+            showPcs(pcs)
+            pcList.visibility = View.VISIBLE
 
-            val showForm = editingCode || linkPending
+            val showForm = editingCode || linkedTopic != null
             pairedActions.visibility = if (showForm) View.GONE else View.VISIBLE
             pairCard.visibility = if (showForm) View.VISIBLE else View.GONE
             cancelPair.visibility = if (showForm) View.VISIBLE else View.GONE
@@ -281,18 +412,14 @@ class MainActivity : Activity() {
         batteryHelp.visibility = if (batteryUnrestricted) View.GONE else View.VISIBLE
         batteryBtn.visibility = if (batteryUnrestricted) View.GONE else View.VISIBLE
 
-        if (linkPending) {
-            showError(R.string.confirm_link)
-        } else if (paired && !notificationsOn) {
-            showError(R.string.error_notifications)
-        } else {
-            error.visibility = View.GONE
+        // The link warning is always part of the banner while a link is waiting; nothing may replace it.
+        val banner = listOfNotNull(notice, linkWarning(pcs)).joinToString("\n\n").ifEmpty {
+            if (paired && !notificationsOn) getString(R.string.error_notifications) else ""
         }
-    }
-
-    private fun showError(textRes: Int) {
-        error.setText(textRes)
-        error.visibility = View.VISIBLE
+        if (error.text.toString() != banner) {
+            error.text = banner
+        }
+        error.visibility = if (banner.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun openNotificationSettings() {
@@ -320,5 +447,8 @@ class MainActivity : Activity() {
 
     private companion object {
         const val REQUEST_NOTIFICATIONS = 1
+        const val STATE_LINKED_TOPIC = "linked_topic"
+        const val STATE_PENDING_NAME = "pending_pc_name"
+        const val STATE_NOTICE = "notice"
     }
 }

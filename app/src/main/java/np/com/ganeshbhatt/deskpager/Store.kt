@@ -1,7 +1,10 @@
 package np.com.ganeshbhatt.deskpager
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /** One paired Windows PC (e.g. Home Laptop or Office Laptop). */
@@ -13,11 +16,86 @@ data class LastBuzz(val title: String, val text: String, val timeSecs: Long)
 /** Counts of quick stretches and long breaks received on this phone. */
 data class BuzzStats(val quickStretches: Int, val longBreaks: Int)
 
+/** Pure rules for the paired-PC list (stored form, cap, de-duplication, labels); plain values in and out. */
+object PcList {
+    /** Most PCs that can be paired at once; one more is refused, never swapped in for an older one. */
+    const val MAX_PCS = 5
+    private const val DEFAULT_LABEL_PREFIX = "Laptop "
+    private const val FIELD_TOPIC = "topic"
+    private const val FIELD_LABEL = "label"
+    private const val FIRST_DUPLICATE_SUFFIX = 2
+
+    /**
+     * Reads the stored JSON list, keeping only entries whose topic is a bare valid topic (first one wins).
+     *
+     * @throws JSONException when [raw] is not a JSON array, so the caller can preserve it instead of overwriting.
+     */
+    @Throws(JSONException::class)
+    fun decode(raw: String): List<PairedPc> {
+        val arr = JSONArray(raw)
+        val list = mutableListOf<PairedPc>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val topic = obj.optString(FIELD_TOPIC, "")
+            if (Ntfy.isTopic(topic) && list.none { it.topic == topic }) {
+                list.add(PairedPc(topic, obj.optString(FIELD_LABEL, "").ifBlank { defaultLabel(i) }))
+            }
+        }
+        return list
+    }
+
+    /** Returns the JSON form of [pcs] that [decode] reads back. */
+    fun encode(pcs: List<PairedPc>): String {
+        val arr = JSONArray()
+        for (pc in pcs) {
+            arr.put(JSONObject().put(FIELD_TOPIC, pc.topic).put(FIELD_LABEL, pc.label))
+        }
+        return arr.toString()
+    }
+
+    /**
+     * Returns [pcs] with [topic] added, or relabelled when it is already paired; a blank [label] keeps the
+     * current label or falls back to the default, and a label another PC already uses gets a numeric suffix.
+     *
+     * @return the new list, or null when [topic] is new and [MAX_PCS] are already paired.
+     */
+    fun add(pcs: List<PairedPc>, topic: String, label: String?): List<PairedPc>? {
+        val index = pcs.indexOfFirst { it.topic == topic }
+        if (index < 0 && pcs.size >= MAX_PCS) {
+            return null
+        }
+        val wanted = label?.takeIf { it.isNotBlank() }
+            ?: if (index >= 0) pcs[index].label else defaultLabel(pcs.size)
+        val pc = PairedPc(topic, uniqueLabel(pcs, topic, wanted))
+        return if (index >= 0) pcs.toMutableList().also { it[index] = pc } else pcs + pc
+    }
+
+    /** Returns [pcs] without the PC paired under [topic]. */
+    fun remove(pcs: List<PairedPc>, topic: String): List<PairedPc> = pcs.filter { it.topic != topic }
+
+    /** Returns [label], or `label (2)`, `label (3)`… when a PC with a different topic already uses it. */
+    fun uniqueLabel(pcs: List<PairedPc>, topic: String, label: String): String {
+        val taken = pcs.filter { it.topic != topic }.map { it.label.lowercase() }
+        var candidate = label
+        var suffix = FIRST_DUPLICATE_SUFFIX
+        while (candidate.lowercase() in taken) {
+            candidate = "$label ($suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    /** Returns the label given to the PC at zero-based [position] when the pairing link names none. */
+    fun defaultLabel(position: Int): String = "$DEFAULT_LABEL_PREFIX${position + 1}"
+}
+
 /** Keeps paired PCs (supporting multiple laptops simultaneously) and recent buzz history in private storage. */
 object Store {
+    private const val TAG = "DeskPager"
     private const val PREFS = "desk_pager"
     private const val KEY_TOPIC = "topic"
     private const val KEY_PCS = "paired_pcs"
+    private const val KEY_PCS_UNREADABLE = "paired_pcs_unreadable_backup"
     private const val KEY_LAST_TITLE = "last_buzz_title"
     private const val KEY_LAST_TEXT = "last_buzz_text"
     private const val KEY_LAST_TIME = "last_buzz_time"
@@ -25,7 +103,6 @@ object Store {
     private const val KEY_STRETCH_COUNT = "stretch_count"
     private const val KEY_LONG_COUNT = "long_count"
     private const val MAX_HISTORY = 5
-    private const val MAX_PCS = 5
 
     /** Returns all paired PCs (migrating a legacy single-topic entry if present). */
     fun pcs(context: Context): List<PairedPc> {
@@ -33,27 +110,26 @@ object Store {
         val raw = prefs.getString(KEY_PCS, null)
         if (raw != null) {
             try {
-                val arr = JSONArray(raw)
-                val list = buildList {
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        val t = obj.optString("topic", "")
-                        val l = obj.optString("label", "PC ${i + 1}")
-                        if (Ntfy.parsePairing(t) != null) {
-                            add(PairedPc(t, l))
-                        }
-                    }
-                }
+                val list = PcList.decode(raw)
                 if (list.isNotEmpty()) return list
-            } catch (_: Exception) {
+            } catch (e: JSONException) {
+                keepUnreadablePcs(prefs, raw)
             }
         }
         val legacy = prefs.getString(KEY_TOPIC, null)
-        return if (legacy != null && Ntfy.parsePairing(legacy) != null) {
-            listOf(PairedPc(legacy, "Laptop 1"))
+        return if (legacy != null && Ntfy.isTopic(legacy)) {
+            listOf(PairedPc(legacy, PcList.defaultLabel(0)))
         } else {
             emptyList()
         }
+    }
+
+    /** Copies an unparseable stored list aside before any later write can replace it. */
+    private fun keepUnreadablePcs(prefs: SharedPreferences, raw: String) {
+        if (prefs.getString(KEY_PCS_UNREADABLE, null) == raw) return
+        // No exception message or stored value here: both can contain a topic.
+        Log.w(TAG, "paired PC list is unreadable; kept a backup copy and fell back to the last paired PC")
+        prefs.edit().putString(KEY_PCS_UNREADABLE, raw).apply()
     }
 
     /**
@@ -66,28 +142,31 @@ object Store {
     }
 
     /**
-     * Adds a PC to the paired list (or updates its label if already paired), keeping up to [MAX_PCS] laptops
-     * active simultaneously so the user never has to re-enter codes when switching between Home and Office.
+     * Adds a PC to the paired list (or updates its label if already paired), keeping up to [PcList.MAX_PCS]
+     * laptops active simultaneously so the user never has to re-enter codes when switching between them.
+     *
+     * @return false, changing nothing, when the list is full and [topic] is not already in it.
      */
-    fun addPc(context: Context, topic: String, label: String?) {
-        val existing = pcs(context).toMutableList()
-        val existingIdx = existing.indexOfFirst { it.topic == topic }
-        val resolvedLabel = label?.takeIf { it.isNotBlank() }
-            ?: if (existingIdx >= 0) existing[existingIdx].label else "Laptop ${existing.size + 1}"
-        if (existingIdx >= 0) {
-            existing[existingIdx] = PairedPc(topic, resolvedLabel)
+    fun addPc(context: Context, topic: String, label: String?): Boolean {
+        val updated = PcList.add(pcs(context), topic, label) ?: return false
+        savePcs(context, updated)
+        return true
+    }
+
+    /** Removes one paired PC, leaving the other PCs, the history and the counters untouched. */
+    fun removePc(context: Context, topic: String) {
+        savePcs(context, PcList.remove(pcs(context), topic))
+    }
+
+    private fun savePcs(context: Context, pcs: List<PairedPc>) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        if (pcs.isEmpty()) {
+            // The legacy key must go too, or pcs() would bring the removed PC back from it.
+            editor.remove(KEY_PCS).remove(KEY_TOPIC)
         } else {
-            existing.add(PairedPc(topic, resolvedLabel))
+            editor.putString(KEY_PCS, PcList.encode(pcs)).putString(KEY_TOPIC, pcs.last().topic)
         }
-        val trimmed = existing.takeLast(MAX_PCS)
-        val arr = JSONArray()
-        for (pc in trimmed) {
-            arr.put(JSONObject().put("topic", pc.topic).put("label", pc.label))
-        }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_PCS, arr.toString())
-            .putString(KEY_TOPIC, trimmed.last().topic)
-            .apply()
+        editor.apply()
     }
 
     /** Clears all paired PCs and history when [topic] is null, or adds a PC when non-null. */
@@ -165,7 +244,8 @@ object Store {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: JSONException) {
+            Log.w(TAG, "buzz history is unreadable; showing only the last buzz")
             listOfNotNull(lastBuzz(context))
         }
     }

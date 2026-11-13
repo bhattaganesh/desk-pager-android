@@ -19,6 +19,9 @@ object Ntfy {
     private val TOPIC = Regex("^deskpager-[0-9a-f]{32}$")
     private val SAFE_NAME = Regex("^[A-Za-z0-9 _.-]{1,28}$")
 
+    /** Whether [value] is exactly a bare topic (never a link), the only form allowed into storage or a URL. */
+    fun isTopic(value: String): Boolean = TOPIC.matches(value)
+
     /**
      * Extracts the topic and optional PC label from a pasted code or scanned `deskpager://` link.
      *

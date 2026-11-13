@@ -75,14 +75,12 @@
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/channel_info"
+            <LinearLayout
+                android:id="@+id/pc_list"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:fontFamily="monospace"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp"
+                android:orientation="vertical"
                 android:visibility="gone" />
 
             <LinearLayout
