@@ -25,6 +25,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Live state of the background ntfy stream. */
 enum class StreamState {
@@ -243,25 +245,17 @@ class ListenerService : Service() {
         private var alertCap: Runnable? = null
         private var ringCheck: Runnable? = null
 
-        @Volatile
-        var streamState: StreamState = StreamState.STOPPED
-            private set
+        private val mutableStreamState = MutableStateFlow(StreamState.STOPPED)
+        private val mutableAlertActive = MutableStateFlow(false)
 
-        @Volatile
-        var strictAlarmActive: Boolean = false
-            private set
+        /** The live state of the stream; [StreamState.STOPPED] whenever the service is not running. */
+        val streamState: StateFlow<StreamState> = mutableStreamState
 
-        @Volatile
-        var onUiUpdate: (() -> Unit)? = null
+        /** Whether an until-stopped alert is vibrating or ringing right now. */
+        val alertActive: StateFlow<Boolean> = mutableAlertActive
 
         private fun publishStreamState(newState: StreamState) {
-            if (streamState == newState) return
-            streamState = newState
-            notifyUi()
-        }
-
-        private fun notifyUi() {
-            mainHandler.post { onUiUpdate?.invoke() }
+            mutableStreamState.value = newState
         }
 
         private fun openAppIntent(context: Context): PendingIntent = PendingIntent.getActivity(
@@ -322,7 +316,7 @@ class ListenerService : Service() {
                 context.getSystemService(NotificationManager::class.java)
                     .notify(BUZZ_ID, buzzNotification(context, buzz, keepsGoing))
             }
-            notifyUi()
+            AppEvents.storeChanged()
         }
 
         private fun buzzNotification(context: Context, buzz: Buzz, keepsGoing: Boolean): Notification {
@@ -365,7 +359,7 @@ class ListenerService : Service() {
             }
             alertCap = cap
             mainHandler.postDelayed(cap, ALERT_CAP_MS)
-            strictAlarmActive = true
+            mutableAlertActive.value = true
             return true
         }
 
@@ -457,7 +451,7 @@ class ListenerService : Service() {
             alertVibrator = null
             alertRingtone?.stop()
             alertRingtone = null
-            strictAlarmActive = false
+            mutableAlertActive.value = false
         }
 
         /** Stops any alert that is still going and removes the reminder notification. */
@@ -466,7 +460,6 @@ class ListenerService : Service() {
                 silence()
                 context.getSystemService(NotificationManager::class.java)?.cancel(BUZZ_ID)
             }
-            notifyUi()
         }
 
         /** Stops the alert on the user's say-so: the Stop action, a swipe, the in-app button, or the PC's clear. */

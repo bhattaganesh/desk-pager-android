@@ -1,63 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Desk Pager</string>
-    <string name="intro">Two-tier posture, eye rest &amp; walk reminders from your Windows PC</string>
-    <string name="status_unpaired">Not paired with a PC</string>
-    <string name="status_paired_connected">Connected · Listening for reminders</string>
-    <string name="status_paired_connecting">Paired · Connecting to relay…</string>
-    <string name="status_paired_reconnecting">Reconnecting to relay…</string>
-    <string name="channel_label">Channel: %1$s</string>
-    <string name="last_buzz_none">No reminders received yet — tap Test Phone Alert below or Send Test Buzz on your PC.</string>
-    <string name="section_activity">Reminder Activity &amp; History</string>
-    <string name="stat_stretches_label">Quick Stretches</string>
-    <string name="stat_long_breaks_label">Long Breaks</string>
-    <string name="ack_break_action">Stop</string>
-    <string name="stop_strict_alarm_btn">Stop alert</string>
-    <string name="test_local_alert">Try quick stretch alert</string>
-    <string name="test_strict_alarm">Try long break alert</string>
-    <string name="stretch_style_label">Quick stretch alert</string>
-    <string name="long_break_style_label">Long break alert</string>
-    <!-- Same order as the AlertStyle enum. -->
-    <string-array name="alert_styles">
-        <item>Vibrate 3 times</item>
-        <item>Keep vibrating until I stop it</item>
-        <item>Keep ringing until I stop it</item>
-    </string-array>
-    <string name="history_toggle_collapsed">Recent History (%1$d) ▾</string>
-    <string name="history_toggle_expanded">Hide History (%1$d) ▴</string>
-    <string name="local_test_title">Quick stretch &amp; eye rest (Test)</string>
-    <string name="local_test_body">This is how a quick stretch reminder alerts you, using your “Quick stretch alert” setting.</string>
-    <string name="strict_test_title">Time for a long break (Test)</string>
-    <string name="strict_test_body">This is how a long break reminder alerts you, using your “Long break alert” setting. If it keeps going, tap Stop.</string>
-    <string name="section_permissions">Delivery Readiness</string>
-    <string name="perm_notifications">Notifications (tap to configure)</string>
-    <string name="perm_battery">Unrestricted background battery</string>
-    <string name="perm_ok">Enabled</string>
-    <string name="perm_missing">Action needed</string>
-    <string name="section_pair">Pair a Windows PC (Home or Office)</string>
-    <string name="code_label">Scan QR code or paste code — multiple laptops stay connected simultaneously</string>
-    <string name="code_hint">deskpager-…</string>
+
+    <!-- Pairing -->
+    <string name="onboarding_intro">Get a buzz on your phone when it is time to stand up from your PC.</string>
+    <string name="scan_qr">Scan QR code</string>
+    <string name="scan_hint">On your PC, open Desk Pager and go to Phone pairing to show the QR code.</string>
+    <string name="enter_code">Enter code instead</string>
+    <string name="code_field_label">Pairing code</string>
+    <string name="code_field_hint">Starts with deskpager-</string>
     <string name="paste">Paste</string>
-    <string name="pair">Pair / Add PC</string>
-    <string name="reconnect">Reconnect</string>
-    <string name="change_code">+ Add PC</string>
+    <string name="pair">Pair</string>
     <string name="cancel">Cancel</string>
-    <string name="unpair">Unpair All</string>
-    <string name="battery">Allow unrestricted battery</string>
-    <string name="battery_help">Allows buzzes to wake your phone immediately while the screen is off (Doze mode).</string>
-    <string name="error_bad_code">Invalid pairing code. Copy the full deskpager-… code from the Windows app.</string>
-    <string name="error_max_pcs">%1$d PCs are already paired, which is the most Desk Pager keeps. Nothing was changed — remove one first, then pair again.</string>
-    <string name="confirm_link_intro">A pairing link filled in this code. Tap “%1$s” only if you just scanned it from your own PC.</string>
-    <string name="confirm_link_add">It will ADD a PC named “%1$s” (%2$s). PCs already paired: %3$d.</string>
-    <string name="confirm_link_already_paired">This PC (%1$s) is already paired, so nothing is added. Its name will be “%2$s”.</string>
-    <string name="confirm_link_label_clash">A different PC is already named “%1$s”, so this one will be saved as “%2$s”.</string>
-    <string name="confirm_link_full">It cannot be added: %1$d PCs are already paired. Remove one first.</string>
-    <string name="pc_row">• %1$s: %2$s</string>
+    <string name="close">Close</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="notice_paired">Paired with %1$s</string>
+    <string name="notice_already_paired">%1$s is already paired. Nothing was added.</string>
+    <string name="error_bad_code">That is not a Desk Pager pairing code. Scan the QR code shown on your PC, or copy the full code that starts with deskpager-.</string>
+    <string name="error_max_pcs">You already have %1$d PCs paired, which is the most allowed. Remove one first.</string>
+    <string name="error_scanner">The scanner could not start. It needs Google Play Services and may still be downloading. Try again in a minute, or enter the code instead.</string>
+    <string name="error_bad_link">That pairing link is not valid. Scan the QR code on your PC again.</string>
+    <string name="error_clipboard_empty">There is nothing to paste.</string>
+
+    <!-- Confirmation for a pairing link opened from outside the app -->
+    <string name="link_dialog_title">Add this PC?</string>
+    <string name="link_dialog_intro">A link from outside Desk Pager wants to pair this phone with a PC. Only continue if you just scanned the code on your own PC.</string>
+    <string name="link_dialog_add">It will add “%1$s” (%2$s). PCs already paired: %3$d.</string>
+    <string name="link_dialog_already_paired">“%1$s” (%2$s) is already paired, so nothing new is added.</string>
+    <string name="link_dialog_label_changed">Another PC is already called “%1$s”, so this one will be saved as “%2$s”.</string>
+    <string name="link_dialog_full">It cannot be added because %1$d PCs are already paired. Remove one first.</string>
+    <string name="add_this_pc">Add this PC</string>
+
+    <!-- Home -->
+    <string name="alert_active_title">A reminder is still going</string>
+    <string name="stop_alert">Stop</string>
+    <string name="status_connected">Connected. Reminders will arrive.</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_reconnecting">No connection. Trying again…</string>
+    <string name="status_stopped">Not running. Reminders will not arrive.</string>
+    <string name="reconnect">Reconnect</string>
+    <string name="setup_title">Finish setting up</string>
+    <string name="setup_notifications">Notifications are turned off, so reminders cannot be shown.</string>
+    <string name="setup_notifications_action">Turn on notifications</string>
+    <string name="setup_battery">Android may pause Desk Pager to save battery, which delays reminders.</string>
+    <string name="setup_battery_action">Allow background use</string>
+    <string name="activity_title">Reminders</string>
+    <string name="last_reminder_none">No reminders yet.</string>
+    <string name="stat_stretches_label">Quick stretches</string>
+    <string name="stat_long_breaks_label">Long breaks</string>
+    <string name="history_show">Show recent reminders (%1$d)</string>
+    <string name="history_hide">Hide recent reminders</string>
+    <string name="pcs_title">Paired PCs</string>
+    <string name="add_pc">Add PC</string>
+    <string name="add_pc_title">Add a PC</string>
     <string name="remove_pc">Remove</string>
     <string name="remove_pc_description">Remove %1$s</string>
     <string name="remove_pc_title">Remove “%1$s”?</string>
     <string name="remove_pc_message">This phone will stop receiving reminders from %1$s (%2$s). Other paired PCs, your history and your counters are kept.</string>
-    <string name="error_notifications">Notifications are disabled for Desk Pager. Tap the Notifications row below to enable them.</string>
+    <string name="alerts_title">How reminders alert you</string>
+    <string name="stretch_style_label">Quick stretch</string>
+    <string name="long_break_style_label">Long break</string>
+    <string name="alert_style_quick">Vibrate 3 times</string>
+    <string name="alert_style_vibrate">Keep vibrating until I stop it</string>
+    <string name="alert_style_ring">Keep ringing until I stop it</string>
+    <string name="try_it">Try it</string>
+    <string name="try_stretch_description">Try the quick stretch alert</string>
+    <string name="try_long_break_description">Try the long break alert</string>
+    <string name="unpair_all">Unpair all PCs</string>
+    <string name="unpair_title">Unpair all PCs?</string>
+    <string name="unpair_message">This phone will stop receiving reminders, and the reminder history and counters are cleared.</string>
+    <string name="unpair_confirm">Unpair all</string>
+    <string name="version_label">Version %1$s</string>
+
+    <!-- Notifications -->
+    <string name="ack_break_action">Stop</string>
+    <string name="local_test_title">Quick stretch &amp; eye rest (Test)</string>
+    <string name="local_test_body">This is how a quick stretch reminder alerts you, using your “Quick stretch” setting.</string>
+    <string name="strict_test_title">Time for a long break (Test)</string>
+    <string name="strict_test_body">This is how a long break reminder alerts you, using your “Long break” setting. If it keeps going, tap Stop.</string>
     <string name="channel_listening">Background connection</string>
     <string name="channel_alerts">Reminders (alert style is set inside the app)</string>
     <string name="state_listening">Connected · Reminders active</string>
